@@ -81,24 +81,12 @@
             </div>
             <input id="tmi_max_tokens" type="number" class="text_pole max_tokens" min="50" max="2000" step="50" value="500" />
 
-            <hr class="m-t-1 m-b-1">
-
-            <!-- 프리셋 관리 -->
-            <div>
-                <label>프리셋 관리</label>
-                <small class="notes">프롬프트 + CSS를 세트로 저장/불러오기</small>
+            <!-- 컨텍스트 메시지 수 -->
+            <div style="margin-top: 10px;">
+                <label for="tmi_context_messages">컨텍스트 메시지 수</label>
+                <small class="notes">TMI 생성 시 참고할 최근 메시지 개수 (기본 20개)</small>
             </div>
-            <div style="display: flex; gap: 6px; margin-top: 6px; margin-bottom: 10px;">
-                <select id="tmi_preset_select" class="text_pole preset_select" style="flex: 1;">
-                    <!-- 프리셋 목록은 JavaScript로 동적 생성됨 -->
-                </select>
-                <button class="menu_button interactable preset_save" title="현재 설정을 새 프리셋으로 저장">
-                    <i class="fa-solid fa-floppy-disk"></i>
-                </button>
-                <button class="menu_button interactable preset_delete" title="선택한 프리셋 삭제">
-                    <i class="fa-solid fa-trash"></i>
-                </button>
-            </div>
+            <input id="tmi_context_messages" type="number" class="text_pole context_messages" min="5" max="50" step="5" value="20" />
 
             <hr class="m-t-1 m-b-1">
 
@@ -107,9 +95,17 @@
                 <label for="tmi_prompt">커스텀 프롬프트</label>
                 <button class="menu_button fa-solid fa-undo interactable restore_prompt" title="기본 프롬프트로 복원"></button>
             </div>
-            <small class="notes">
-                어떤 종류의 TMI를 생성할지 설명합니다
-            </small>
+            <small class="notes">어떤 종류의 TMI를 생성할지 설명합니다</small>
+
+            <!-- 프롬프트 프리셋 -->
+            <div style="display: flex; gap: 6px; margin-top: 6px; margin-bottom: 6px;">
+                <select id="tmi_prompt_preset_select" class="text_pole prompt_preset_select" style="flex: 1;">
+                    <!-- 프롬프트 프리셋 목록 -->
+                </select>
+                <button class="menu_button fa-solid fa-floppy-disk interactable prompt_preset_save" title="현재 프롬프트를 프리셋으로 저장"></button>
+                <button class="menu_button fa-solid fa-trash interactable prompt_preset_delete" title="선택한 프롬프트 프리셋 삭제"></button>
+            </div>
+
             <textarea id="tmi_prompt" class="text_pole textarea_compact prompt" rows="6"></textarea>
 
             <hr class="m-t-1 m-b-1">
@@ -119,7 +115,33 @@
                 <label for="tmi_custom_css">Custom CSS</label>
                 <button class="menu_button fa-solid fa-undo interactable restore_css" title="기본 CSS로 복원"></button>
             </div>
+
+            <!-- CSS 프리셋 -->
+            <div style="display: flex; gap: 6px; margin-top: 6px; margin-bottom: 6px;">
+                <select id="tmi_css_preset_select" class="text_pole css_preset_select" style="flex: 1;">
+                    <!-- CSS 프리셋 목록 -->
+                </select>
+                <button class="menu_button fa-solid fa-floppy-disk interactable css_preset_save" title="현재 CSS를 프리셋으로 저장"></button>
+                <button class="menu_button fa-solid fa-trash interactable css_preset_delete" title="선택한 CSS 프리셋 삭제"></button>
+            </div>
+
             <textarea id="tmi_custom_css" class="text_pole textarea_compact custom_css" rows="6"></textarea>
+
+            <hr class="m-t-1 m-b-1">
+
+            <!-- TMI 데이터 관리 -->
+            <div>
+                <label>TMI 데이터 관리</label>
+                <small class="notes">저장된 TMI 데이터를 정리할 수 있습니다</small>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 6px; margin-bottom: 10px;">
+                <button class="menu_button interactable tmi_clear_current" style="flex: 1;">
+                    현재 채팅방 TMI 초기화
+                </button>
+                <button class="menu_button interactable tmi_clear_all" style="flex: 1;">
+                    전체 TMI 초기화
+                </button>
+            </div>
         </div>
     </div>
 </div>

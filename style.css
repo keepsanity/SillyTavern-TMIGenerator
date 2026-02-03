@@ -28,6 +28,38 @@
     animation: tmiSpin 1s linear infinite;
 }
 
+/* 에러 메시지 레이아웃 (필수 기능) */
+.tmi-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px;
+    text-align: center;
+}
+
+/* 에러 재시도 버튼 */
+.tmi-error-retry {
+    background: var(--SmartThemeBorderColor);
+    border: 1px solid var(--SmartThemeQuoteColor);
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: all 0.2s ease;
+    color: var(--SmartThemeBodyColor);
+}
+
+.tmi-error-retry:hover:not(:disabled) {
+    background: var(--SmartThemeQuoteColor);
+    transform: scale(1.05);
+}
+
+.tmi-error-retry:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* 설정 패널 기본 레이아웃 */
 .tmi_settings {
     display: flex;

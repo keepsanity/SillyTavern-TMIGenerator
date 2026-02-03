@@ -4,7 +4,7 @@
  */
 
 import { event_types } from '../../../events.js';
-import { generateQuietPrompt } from '../../../../script.js';
+import { generateQuietPrompt, getCurrentChatId } from '../../../../script.js';
 
 const EXTENSION_NAME = 'SillyTavern-TMIGenerator';
 
@@ -134,8 +134,6 @@ const DEFAULT_CSS = `/* TMI Generator - 기본 스타일 (자유롭게 수정하
     color: var(--SmartThemeEmColor);
     font-style: italic;
     opacity: 0.8;
-    padding: 12px;
-    text-align: center;
     background: var(--black20a);
 }`;
 
@@ -151,13 +149,28 @@ const DEFAULT_SETTINGS = {
     htmlTemplate: DEFAULT_HTML_TEMPLATE,
     customCss: DEFAULT_CSS,
     autoOpen: false,
+    contextMessages: 20, // 컨텍스트에 포함할 메시지 개수 (기본 20개)
     tmiData: {}, // settings.json에 TMI 데이터 저장
-    presets: {}, // 프리셋 저장 { 'preset_name': { prompt, customCss } }
+    promptPresets: {}, // 프롬프트 프리셋 저장 { 'preset_name': prompt }
+    cssPresets: {}, // CSS 프리셋 저장 { 'preset_name': css }
 };
 
 let extensionSettings = {};
 let globalContext = null;
 const pendingRequests = new Set();
+
+// 채팅 ID + 메시지 ID + 스와이프 ID를 조합한 고유 키 생성
+// 각 채팅방, 메시지, 스와이프마다 독립적인 TMI 저장
+function getTMIKey(messageId) {
+    const chatId = getCurrentChatId();
+    if (!chatId) return null; // 채팅이 없으면 null 반환
+
+    const message = globalContext.chat[messageId];
+    if (!message) return null;
+
+    const swipeId = message.swipe_id ?? 0;
+    return `${chatId}__${messageId}_${swipeId}`;
+}
 
 async function init() {
     console.log(`[${EXTENSION_NAME}] 초기화 시작...`);
@@ -175,25 +188,42 @@ async function init() {
         }
     });
 
+    // 기존 presets를 promptPresets와 cssPresets로 마이그레이션
+    if (extensionSettings.presets && !extensionSettings.promptPresets && !extensionSettings.cssPresets) {
+        console.log(`[${EXTENSION_NAME}] 기존 presets를 분리합니다...`);
+        extensionSettings.promptPresets = {};
+        extensionSettings.cssPresets = {};
+
+        Object.keys(extensionSettings.presets).forEach(name => {
+            const preset = extensionSettings.presets[name];
+            if (preset.prompt) {
+                extensionSettings.promptPresets[name] = preset.prompt;
+            }
+            if (preset.customCss) {
+                extensionSettings.cssPresets[name] = preset.customCss;
+            }
+        });
+
+        delete extensionSettings.presets;
+        saveSettings();
+        console.log(`[${EXTENSION_NAME}] 마이그레이션 완료: ${Object.keys(extensionSettings.promptPresets).length}개 프롬프트, ${Object.keys(extensionSettings.cssPresets).length}개 CSS`);
+    }
+
     // 기본 프리셋 추가
     addDefaultPresets();
 
     await loadSettingsUI();
     initializeEventListeners();
     injectCustomCSS();
-    cleanupOldTMIData();
 
     console.log(`[${EXTENSION_NAME}] 초기화 완료`);
 }
 
 function addDefaultPresets() {
-    if (!extensionSettings.presets) extensionSettings.presets = {};
-
-    // 기본 프리셋이 없을 때만 추가 (기존 프리셋 유지)
-    if (Object.keys(extensionSettings.presets).length === 0) {
-        // 1. 기본 프리셋
-        extensionSettings.presets['기본'] = {
-        prompt: `Generate interesting TMI facts about the current conversation, mixing character details and world-building.
+    // 프롬프트 프리셋 초기화
+    if (!extensionSettings.promptPresets) extensionSettings.promptPresets = {};
+    if (Object.keys(extensionSettings.promptPresets).length === 0) {
+        extensionSettings.promptPresets['기본'] = `Generate interesting TMI facts about the current conversation, mixing character details and world-building.
 
 Good TMI examples:
 - Character quirks, habits, or hidden thoughts
@@ -202,13 +232,9 @@ Good TMI examples:
 - Relationship dynamics
 - Background context or history
 
-Mix character-focused and world-focused facts naturally.`,
-        customCss: DEFAULT_CSS,
-    };
+Mix character-focused and world-focused facts naturally.`;
 
-    // 2. 세계관 TMI
-    extensionSettings.presets['세계관 TMI'] = {
-        prompt: `Generate world-building TMI facts about the setting, environment, and lore of the current scene.
+        extensionSettings.promptPresets['세계관 TMI'] = `Generate world-building TMI facts about the setting, environment, and lore of the current scene.
 
 Focus on:
 - Location history and significance
@@ -216,21 +242,9 @@ Focus on:
 - Environmental characteristics
 - Technological or magical systems
 - Background events or context
-- Setting atmosphere and mood`,
-        customCss: `.tmi-container { margin-top: 8px; border-radius: 10px; background: var(--SmartThemeBlurTintColor); border: 1px solid var(--SmartThemeBorderColor); overflow: hidden; }
-.tmi-header { background: var(--SmartBotMesBlurTintColor); padding: 6px 10px; cursor: pointer; display: flex; justify-content: space-between; border-bottom: 1px solid var(--SmartThemeBorderColor); }
-.tmi-title { font-weight: bold; font-size: 0.85em; color: var(--SmartThemeUnderlineColor); }
-.tmi-toggle-icon { font-size: 0.7em; color: var(--SmartThemeQuoteColor); transition: transform 0.3s ease; }
-.tmi-toggle-icon.expanded { transform: rotate(180deg); }
-.tmi-content { overflow: hidden; max-height: 1000px; transition: max-height 0.3s ease; }
-.tmi-content.collapsed { max-height: 0; }
-.tmi-item { padding: 6px 10px; border-bottom: 1px dashed var(--SmartThemeBorderColor); color: var(--SmartThemeQuoteColor); font-size: 0.8em; }
-.tmi-item:last-child { border-bottom: none; }`,
-    };
+- Setting atmosphere and mood`;
 
-    // 3. 캐릭터 감정 분석
-    extensionSettings.presets['캐릭터 감정 TMI'] = {
-        prompt: `Analyze the emotional undertones and psychological nuances of the characters in the conversation.
+        extensionSettings.promptPresets['캐릭터 감정 TMI'] = `Analyze the emotional undertones and psychological nuances of the characters in the conversation.
 
 Focus on:
 - Hidden feelings and subtext
@@ -238,21 +252,19 @@ Focus on:
 - Character motivations and desires
 - Inner thoughts and conflicts
 - Unspoken emotions or intentions
-- Psychological state and mood`,
-        customCss: `.tmi-container { margin-top: 10px; border-radius: 12px; background: linear-gradient(135deg, var(--SmartThemeBlurTintColor) 0%, var(--SmartBotMesBlurTintColor) 100%); border: 1.5px solid var(--SmartThemeBorderColor); overflow: hidden; box-shadow: 0 3px 10px rgba(0,0,0,0.1); }
-.tmi-header { background: rgba(0,0,0,0.2); padding: 8px 12px; cursor: pointer; display: flex; justify-content: space-between; border-bottom: 1.5px solid var(--SmartThemeBorderColor); }
-.tmi-title { font-weight: bold; color: var(--SmartThemeUnderlineColor); }
-.tmi-toggle-icon { color: var(--SmartThemeQuoteColor); transition: transform 0.3s ease; }
-.tmi-toggle-icon.expanded { transform: rotate(180deg); }
-.tmi-content { overflow: hidden; max-height: 1000px; transition: max-height 0.3s ease; }
-.tmi-content.collapsed { max-height: 0; }
-.tmi-item { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); color: var(--SmartThemeQuoteColor); font-size: 0.85em; font-style: italic; }
-.tmi-item:last-child { border-bottom: none; }`,
-    };
+- Psychological state and mood`;
 
-        saveSettings();
-        console.log(`[${EXTENSION_NAME}] 기본 프리셋 ${Object.keys(extensionSettings.presets).length}개 추가됨`);
+        console.log(`[${EXTENSION_NAME}] 기본 프롬프트 프리셋 ${Object.keys(extensionSettings.promptPresets).length}개 추가됨`);
     }
+
+    // CSS 프리셋 초기화 (기본 하나만)
+    if (!extensionSettings.cssPresets) extensionSettings.cssPresets = {};
+    if (Object.keys(extensionSettings.cssPresets).length === 0) {
+        extensionSettings.cssPresets['기본'] = DEFAULT_CSS;
+        console.log(`[${EXTENSION_NAME}] 기본 CSS 프리셋 추가됨`);
+    }
+
+    saveSettings();
 }
 
 async function loadSettingsUI() {
@@ -334,6 +346,13 @@ async function loadSettingsUI() {
             saveSettings();
         });
 
+    settingsContainer.find('.context_messages')
+        .val(extensionSettings.contextMessages)
+        .on('change', function() {
+            extensionSettings.contextMessages = Number($(this).val());
+            saveSettings();
+        });
+
     settingsContainer.find('.prompt')
         .val(extensionSettings.prompt)
         .on('change', function() {
@@ -376,6 +395,39 @@ async function loadSettingsUI() {
         }
     });
 
+    // TMI 데이터 초기화 버튼들
+    settingsContainer.find('.tmi_clear_current').on('click', async function() {
+        const confirm = await globalContext.Popup.show.confirm(
+            '현재 채팅방의 모든 TMI 데이터를 삭제하시겠습니까?\n(화면에 표시된 TMI도 함께 사라집니다)',
+            '현재 채팅방 TMI 초기화'
+        );
+        if (confirm) {
+            const clearedCount = clearCurrentChatTMI();
+            saveSettings();
+
+            // 화면에서도 TMI 제거
+            $('.tmi-container').remove();
+
+            toastr.success(`현재 채팅방의 TMI ${clearedCount}개가 삭제되었습니다.`);
+        }
+    });
+
+    settingsContainer.find('.tmi_clear_all').on('click', async function() {
+        const confirm = await globalContext.Popup.show.confirm(
+            '⚠️ 모든 채팅방의 TMI 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다!',
+            '전체 TMI 초기화'
+        );
+        if (confirm) {
+            const clearedCount = clearAllTMI();
+            saveSettings();
+
+            // 화면에서도 TMI 제거
+            $('.tmi-container').remove();
+
+            toastr.success(`전체 TMI ${clearedCount}개가 삭제되었습니다.`);
+        }
+    });
+
     settingsContainer.find('.auto_open')
         .prop('checked', extensionSettings.autoOpen)
         .on('change', function() {
@@ -383,27 +435,24 @@ async function loadSettingsUI() {
             saveSettings();
         });
 
-    // 프리셋 관리
-    initializePresetUI(settingsContainer);
+    // 프리셋 관리 (분리)
+    initializePromptPresetUI(settingsContainer);
+    initializeCssPresetUI(settingsContainer);
 }
 
-function initializePresetUI(settingsContainer) {
-    const presetSelect = settingsContainer.find('.preset_select');
+// 프롬프트 프리셋 관리
+function initializePromptPresetUI(settingsContainer) {
+    const presetSelect = settingsContainer.find('.prompt_preset_select');
 
-    // 프리셋 목록 업데이트
     function updatePresetList() {
         presetSelect.empty();
-
-        if (extensionSettings.presets) {
-            Object.keys(extensionSettings.presets).forEach(presetName => {
-                presetSelect.append(`<option value="${presetName}">${presetName}</option>`);
+        if (extensionSettings.promptPresets) {
+            Object.keys(extensionSettings.promptPresets).forEach(name => {
+                presetSelect.append(`<option value="${name}">${name}</option>`);
             });
         }
-
-        // 기본 프리셋 자동 선택
-        if (extensionSettings.presets && Object.keys(extensionSettings.presets).length > 0) {
-            const firstPreset = Object.keys(extensionSettings.presets)[0];
-            presetSelect.val(firstPreset);
+        if (Object.keys(extensionSettings.promptPresets || {}).length > 0) {
+            presetSelect.val(Object.keys(extensionSettings.promptPresets)[0]);
         }
     }
 
@@ -411,76 +460,129 @@ function initializePresetUI(settingsContainer) {
 
     // 프리셋 선택 시 불러오기
     presetSelect.on('change', function() {
-        const presetName = $(this).val();
-        if (!presetName) return;
+        const name = $(this).val();
+        if (!name || !extensionSettings.promptPresets[name]) return;
 
-        const preset = extensionSettings.presets[presetName];
-        if (preset) {
-            extensionSettings.prompt = preset.prompt;
-            extensionSettings.customCss = preset.customCss;
-
-            settingsContainer.find('.prompt').val(preset.prompt);
-            settingsContainer.find('.custom_css').val(preset.customCss);
-
-            saveSettings();
-            injectCustomCSS();
-            toastr.success(`프리셋 "${presetName}"을 불러왔습니다.`);
-        }
+        extensionSettings.prompt = extensionSettings.promptPresets[name];
+        settingsContainer.find('.prompt').val(extensionSettings.prompt);
+        saveSettings();
+        toastr.success(`프롬프트 "${name}" 적용됨`);
     });
 
     // 프리셋 저장
-    settingsContainer.find('.preset_save').on('click', async function() {
-        const presetName = await globalContext.Popup.show.input(
-            '프리셋 이름을 입력하세요:',
-            '프리셋 저장'
-        );
+    settingsContainer.find('.prompt_preset_save').on('click', async function() {
+        const name = await globalContext.Popup.show.input('프롬프트 프리셋 이름:', '프롬프트 저장');
+        if (!name || !name.trim()) return;
 
-        if (!presetName || presetName.trim() === '') {
-            return;
-        }
-
-        const trimmedName = presetName.trim();
-
-        // 중복 확인
-        if (extensionSettings.presets[trimmedName]) {
+        const trimmed = name.trim();
+        if (extensionSettings.promptPresets[trimmed]) {
             const confirm = await globalContext.Popup.show.confirm(
-                `"${trimmedName}" 프리셋이 이미 존재합니다. 덮어쓰시겠습니까?`,
-                '프리셋 덮어쓰기'
+                `"${trimmed}" 프리셋이 이미 존재합니다. 덮어쓰시겠습니까?`,
+                '프롬프트 덮어쓰기'
             );
             if (!confirm) return;
         }
 
-        // 현재 설정 저장 (프롬프트 + CSS만)
-        if (!extensionSettings.presets) extensionSettings.presets = {};
-        extensionSettings.presets[trimmedName] = {
-            prompt: extensionSettings.prompt,
-            customCss: extensionSettings.customCss,
-        };
-
+        if (!extensionSettings.promptPresets) extensionSettings.promptPresets = {};
+        extensionSettings.promptPresets[trimmed] = extensionSettings.prompt;
         saveSettings();
         updatePresetList();
-        presetSelect.val(trimmedName);
-        toastr.success(`프리셋 "${trimmedName}"이 저장되었습니다.`);
+        presetSelect.val(trimmed);
+        toastr.success(`프롬프트 "${trimmed}" 저장됨`);
     });
 
     // 프리셋 삭제
-    settingsContainer.find('.preset_delete').on('click', async function() {
-        const presetName = presetSelect.val();
-        if (!presetName) {
-            toastr.warning('삭제할 프리셋을 선택하세요.');
+    settingsContainer.find('.prompt_preset_delete').on('click', async function() {
+        const name = presetSelect.val();
+        if (!name) {
+            toastr.warning('삭제할 프롬프트 프리셋을 선택하세요.');
             return;
         }
 
         const confirm = await globalContext.Popup.show.confirm(
-            `"${presetName}" 프리셋을 삭제하시겠습니까?`,
-            '프리셋 삭제'
+            `"${name}" 프롬프트 프리셋을 삭제하시겠습니까?`,
+            '프롬프트 프리셋 삭제'
         );
 
         if (confirm) {
-            delete extensionSettings.presets[presetName];
+            delete extensionSettings.promptPresets[name];
             saveSettings();
             updatePresetList();
-            toastr.success(`프리셋 "${presetName}"이 삭제되었습니다.`);
+            toastr.success(`프롬프트 "${name}" 삭제됨`);
+        }
+    });
+}
+
+// CSS 프리셋 관리
+function initializeCssPresetUI(settingsContainer) {
+    const presetSelect = settingsContainer.find('.css_preset_select');
+
+    function updatePresetList() {
+        presetSelect.empty();
+        if (extensionSettings.cssPresets) {
+            Object.keys(extensionSettings.cssPresets).forEach(name => {
+                presetSelect.append(`<option value="${name}">${name}</option>`);
+            });
+        }
+        if (Object.keys(extensionSettings.cssPresets || {}).length > 0) {
+            presetSelect.val(Object.keys(extensionSettings.cssPresets)[0]);
+        }
+    }
+
+    updatePresetList();
+
+    // 프리셋 선택 시 불러오기
+    presetSelect.on('change', function() {
+        const name = $(this).val();
+        if (!name || !extensionSettings.cssPresets[name]) return;
+
+        extensionSettings.customCss = extensionSettings.cssPresets[name];
+        settingsContainer.find('.custom_css').val(extensionSettings.customCss);
+        saveSettings();
+        injectCustomCSS();
+        toastr.success(`CSS "${name}" 적용됨`);
+    });
+
+    // 프리셋 저장
+    settingsContainer.find('.css_preset_save').on('click', async function() {
+        const name = await globalContext.Popup.show.input('CSS 프리셋 이름:', 'CSS 저장');
+        if (!name || !name.trim()) return;
+
+        const trimmed = name.trim();
+        if (extensionSettings.cssPresets[trimmed]) {
+            const confirm = await globalContext.Popup.show.confirm(
+                `"${trimmed}" 프리셋이 이미 존재합니다. 덮어쓰시겠습니까?`,
+                'CSS 덮어쓰기'
+            );
+            if (!confirm) return;
+        }
+
+        if (!extensionSettings.cssPresets) extensionSettings.cssPresets = {};
+        extensionSettings.cssPresets[trimmed] = extensionSettings.customCss;
+        saveSettings();
+        updatePresetList();
+        presetSelect.val(trimmed);
+        toastr.success(`CSS "${trimmed}" 저장됨`);
+    });
+
+    // 프리셋 삭제
+    settingsContainer.find('.css_preset_delete').on('click', async function() {
+        const name = presetSelect.val();
+        if (!name) {
+            toastr.warning('삭제할 CSS 프리셋을 선택하세요.');
+            return;
+        }
+
+        const confirm = await globalContext.Popup.show.confirm(
+            `"${name}" CSS 프리셋을 삭제하시겠습니까?`,
+            'CSS 프리셋 삭제'
+        );
+
+        if (confirm) {
+            delete extensionSettings.cssPresets[name];
+            saveSettings();
+            updatePresetList();
+            toastr.success(`CSS "${name}" 삭제됨`);
         }
     });
 }
@@ -509,9 +611,10 @@ function initializeEventListeners() {
             return;
         }
 
-        // settings.json에서 기존 TMI 확인
-        if (extensionSettings.tmiData && extensionSettings.tmiData[messageId]) {
-            const tmiEntry = extensionSettings.tmiData[messageId];
+        // settings.json에서 기존 TMI 확인 (채팅방별, 스와이프별로 저장됨)
+        const tmiKey = getTMIKey(messageId);
+        if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
+            const tmiEntry = extensionSettings.tmiData[tmiKey];
             renderTMI(messageId, tmiEntry.items, tmiEntry.visible);
             return;
         }
@@ -527,6 +630,77 @@ function initializeEventListeners() {
         console.log(`[${EXTENSION_NAME}] CHAT_CHANGED - TMI 복원 대기`);
         // 채팅 변경 후 모든 메시지가 렌더링될 때까지 충분히 대기
         setTimeout(() => restoreAllTMI(), 1500);
+    });
+
+    // 메시지 수정/복구 후 TMI 복원
+    globalContext.eventSource.on(event_types.MESSAGE_UPDATED, (messageId) => {
+        if (!extensionSettings.enabled) return;
+        console.log(`[${EXTENSION_NAME}] MESSAGE_UPDATED:`, messageId);
+
+        const tmiKey = getTMIKey(messageId);
+        if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
+            // 기존 TMI 제거 후 재렌더링
+            const messageElement = $(`[mesid="${messageId}"] .mes_text`);
+            messageElement.find('.tmi-container').remove();
+
+            const tmiEntry = extensionSettings.tmiData[tmiKey];
+            setTimeout(() => renderTMI(messageId, tmiEntry.items, tmiEntry.visible), 100);
+        }
+    });
+
+    // 메시지 삭제 시 TMI도 삭제
+    globalContext.eventSource.on(event_types.MESSAGE_DELETED, (messageId) => {
+        if (!extensionSettings.enabled) return;
+        console.log(`[${EXTENSION_NAME}] MESSAGE_DELETED:`, messageId);
+
+        if (!extensionSettings.tmiData) return;
+
+        const chatId = getCurrentChatId();
+        if (!chatId) return;
+
+        // 해당 메시지의 모든 스와이프 TMI 삭제
+        let deletedCount = 0;
+        const keysToDelete = [];
+
+        Object.keys(extensionSettings.tmiData).forEach(key => {
+            // chatId__messageId_swipeId 형식에서 messageId 추출
+            if (key.startsWith(`${chatId}__${messageId}_`)) {
+                keysToDelete.push(key);
+            }
+        });
+
+        keysToDelete.forEach(key => {
+            delete extensionSettings.tmiData[key];
+            deletedCount++;
+        });
+
+        if (deletedCount > 0) {
+            saveSettings();
+            console.log(`[${EXTENSION_NAME}] 메시지 ${messageId}의 TMI ${deletedCount}개 삭제됨`);
+        }
+    });
+
+    // 스와이프 이벤트: 스와이프 변경 시 해당 스와이프의 TMI 로드
+    globalContext.eventSource.on(event_types.MESSAGE_SWIPED, (messageId) => {
+        if (!extensionSettings.enabled) return;
+        console.log(`[${EXTENSION_NAME}] MESSAGE_SWIPED:`, messageId);
+
+        const message = globalContext.chat[messageId];
+        if (!message || message.is_user) return;
+
+        // 기존 TMI 제거
+        const messageElement = $(`[mesid="${messageId}"] .mes_text`);
+        messageElement.find('.tmi-container').remove();
+
+        // 현재 스와이프의 TMI 확인
+        const tmiKey = getTMIKey(messageId);
+        if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
+            const tmiEntry = extensionSettings.tmiData[tmiKey];
+            renderTMI(messageId, tmiEntry.items, tmiEntry.visible);
+        } else if (tmiKey && extensionSettings.autoGenerate) {
+            // 자동 생성이 켜져 있으면 새로 생성
+            setTimeout(() => generateTMI(messageId), 500);
+        }
     });
 }
 
@@ -569,12 +743,19 @@ async function generateTMI(messageId) {
         return;
     }
 
-    if (pendingRequests.has(messageId)) return;
-
     const message = globalContext.chat[messageId];
     if (!message) return;
 
-    pendingRequests.add(messageId);
+    // tmiKey 기반으로 중복 체크 (chatId__messageId_swipeId)
+    const tmiKey = getTMIKey(messageId);
+    if (!tmiKey) return;
+
+    if (pendingRequests.has(tmiKey)) {
+        console.log(`[${EXTENSION_NAME}] TMI 생성 중복 호출 방지: ${tmiKey}`);
+        return;
+    }
+
+    pendingRequests.add(tmiKey);
 
     const messageElement = $(`[mesid="${messageId}"] .mes_text`);
     messageElement.append(createLoadingHTML());
@@ -614,34 +795,239 @@ async function generateTMI(messageId) {
 
         if (tmiItems && tmiItems.length > 0) {
             // settings.json에만 저장 (채팅 파일에는 저장하지 않음)
+            // 채팅 ID + 메시지 ID + 스와이프 ID 조합으로 키 생성
             if (!extensionSettings.tmiData) extensionSettings.tmiData = {};
-            extensionSettings.tmiData[messageId] = {
-                items: tmiItems,
-                visible: extensionSettings.autoOpen,
-                timestamp: Date.now(),
-            };
+            const tmiKey = getTMIKey(messageId);
+            if (tmiKey) {
+                extensionSettings.tmiData[tmiKey] = {
+                    items: tmiItems,
+                    visible: extensionSettings.autoOpen,
+                    timestamp: Date.now(),
+                };
+            }
 
             saveSettings();
 
             messageElement.find('.tmi-container').remove();
             renderTMI(messageId, tmiItems, extensionSettings.autoOpen);
-            toastr.success('TMI가 생성되었습니다! 💡');
         } else {
             throw new Error('TMI 응답을 파싱할 수 없습니다.');
         }
     } catch (error) {
         console.error(`[${EXTENSION_NAME}] 오류:`, error);
         messageElement.find('.tmi-container').remove();
-        messageElement.append(createErrorHTML(error.message || '알 수 없는 오류'));
+        messageElement.append(createErrorHTML(error.message || '알 수 없는 오류', messageId));
         toastr.error(`TMI 생성 실패: ${error.message}`);
     } finally {
-        pendingRequests.delete(messageId);
+        pendingRequests.delete(tmiKey);
+    }
+}
+
+function getPersonaInfo() {
+    try {
+        // 실행 시점의 최신 context와 전역 변수 가져오기
+        const context = SillyTavern.getContext();
+
+        // user_avatar는 전역 변수에서, power_user도 전역에서
+        // @ts-ignore - 전역 변수
+        const userAvatar = context.accountStorage?.getItem?.('user_avatar') || globalThis.user_avatar;
+        // @ts-ignore - 전역 변수
+        const powerUser = globalThis.power_user;
+
+        console.log(`[${EXTENSION_NAME}] 페르소나 정보 수집:`, {
+            user_avatar: userAvatar,
+            has_power_user: !!powerUser,
+            power_user_keys: powerUser ? Object.keys(powerUser).slice(0, 5) : []
+        });
+
+        if (!userAvatar || !powerUser) {
+            console.log(`[${EXTENSION_NAME}] 페르소나 정보 없음`);
+            return '';
+        }
+
+        let info = '';
+
+        // 페르소나 이름
+        const personaName = powerUser.personas?.[userAvatar] || powerUser.name || 'User';
+        info += `User/Persona: ${personaName}\n`;
+
+        // 페르소나 설명
+        const personaDesc = powerUser.persona_descriptions?.[userAvatar];
+        if (personaDesc?.description) {
+            info += `\nPersona Description:\n${personaDesc.description}\n`;
+        } else if (powerUser.persona_description) {
+            // 폴백: 전역 persona_description
+            info += `\nPersona Description:\n${powerUser.persona_description}\n`;
+        }
+
+        console.log(`[${EXTENSION_NAME}] 페르소나 정보 (${info.length}자):`, info.substring(0, 100));
+        return info.trim();
+    } catch (error) {
+        console.error(`[${EXTENSION_NAME}] 페르소나 정보 가져오기 실패:`, error);
+        return '';
+    }
+}
+
+function getCharacterInfo() {
+    try {
+        // 실행 시점의 최신 context 가져오기
+        const context = SillyTavern.getContext();
+
+        const thisChid = context.characterId;
+        const characters = context.characters;
+
+        console.log(`[${EXTENSION_NAME}] 캐릭터 정보 수집:`, {
+            this_chid: thisChid,
+            has_characters: !!characters,
+            has_character: !!(characters && characters[thisChid]),
+            character_name: characters?.[thisChid]?.name
+        });
+
+        if (thisChid === undefined || !characters || !characters[thisChid]) {
+            console.log(`[${EXTENSION_NAME}] 캐릭터 정보 없음`);
+            return '';
+        }
+
+        const character = characters[thisChid];
+
+        let info = '';
+
+        // 캐릭터 이름
+        if (character.name) {
+            info += `Character: ${character.name}\n`;
+        }
+
+        // V2 형식 (character.data)
+        const charData = character.data || character;
+
+        // 캐릭터 설명
+        if (charData.description) {
+            info += `\nDescription:\n${charData.description}\n`;
+        }
+
+        // 성격
+        if (charData.personality) {
+            info += `\nPersonality:\n${charData.personality}\n`;
+        }
+
+        // 시나리오
+        if (charData.scenario) {
+            info += `\nScenario:\n${charData.scenario}\n`;
+        }
+
+        // Creator Notes (있으면)
+        if (charData.creator_notes) {
+            info += `\nCreator Notes:\n${charData.creator_notes}\n`;
+        }
+
+        // System Prompt (있으면)
+        if (charData.system_prompt) {
+            info += `\nSystem Prompt:\n${charData.system_prompt}\n`;
+        }
+
+        // 캐릭터 북 (Lorebook/World Info)
+        if (charData.character_book?.entries) {
+            const entries = Object.values(charData.character_book.entries);
+            if (entries.length > 0) {
+                info += `\n\nCharacter Lore (${entries.length} entries):\n`;
+                // 상시 활성화된 항목들만 포함 (constant=true)
+                const constantEntries = entries.filter(e => e.constant);
+                if (constantEntries.length > 0) {
+                    constantEntries.forEach(entry => {
+                        if (entry.content) {
+                            info += `- ${entry.content}\n`;
+                        }
+                    });
+                } else {
+                    // 상시 활성화가 없으면 상위 몇 개만
+                    entries.slice(0, 3).forEach(entry => {
+                        if (entry.content) {
+                            info += `- ${entry.content}\n`;
+                        }
+                    });
+                }
+            }
+        }
+
+        console.log(`[${EXTENSION_NAME}] 캐릭터 정보 (${info.length}자):`, info.substring(0, 150));
+        return info.trim();
+    } catch (error) {
+        console.error(`[${EXTENSION_NAME}] 캐릭터 정보 가져오기 실패:`, error);
+        return '';
+    }
+}
+
+function getWorldInfoContext() {
+    try {
+        const context = SillyTavern.getContext();
+        let info = '';
+
+        // @ts-ignore - 전역 변수
+        const selectedWorldInfo = globalThis.selected_world_info || [];
+        // @ts-ignore - 전역 변수
+        const chatMetadata = context.chatMetadata || globalThis.chat_metadata || {};
+
+        // 전역 World Info
+        if (selectedWorldInfo && selectedWorldInfo.length > 0) {
+            info += `\n\nActive World Info: ${selectedWorldInfo.join(', ')}`;
+        }
+
+        // 채팅별 Lorebook
+        if (chatMetadata.world_info) {
+            info += `\nChat Lorebook: ${chatMetadata.world_info}`;
+        }
+
+        // 채팅 메타데이터 (컨텍스트 정보)
+        if (chatMetadata.scenario) {
+            info += `\n\nChat Scenario: ${chatMetadata.scenario}`;
+        }
+
+        console.log(`[${EXTENSION_NAME}] 월드인포 컨텍스트:`, {
+            selected_world_info: selectedWorldInfo,
+            chat_lorebook: chatMetadata.world_info,
+            has_scenario: !!chatMetadata.scenario
+        });
+
+        return info;
+    } catch (error) {
+        console.error(`[${EXTENSION_NAME}] 월드인포 컨텍스트 가져오기 실패:`, error);
+        return '';
     }
 }
 
 function buildContextMessages(upToMessageId) {
     const messages = [];
-    const maxMessages = 10;
+
+    // 페르소나 정보 추가
+    const personaInfo = getPersonaInfo();
+
+    // 캐릭터 정보 추가
+    const charInfo = getCharacterInfo();
+
+    // 월드인포 컨텍스트 추가
+    const worldInfoContext = getWorldInfoContext();
+
+    if (personaInfo || charInfo || worldInfoContext) {
+        let systemContent = '';
+        if (personaInfo) {
+            systemContent += personaInfo;
+        }
+        if (charInfo) {
+            if (systemContent) systemContent += '\n\n';
+            systemContent += charInfo;
+        }
+        if (worldInfoContext) {
+            systemContent += worldInfoContext;
+        }
+
+        messages.push({
+            role: 'system',
+            content: systemContent,
+        });
+    }
+
+    // 최근 대화 내역 추가
+    const maxMessages = extensionSettings.contextMessages || 20;
     const startIdx = Math.max(0, upToMessageId - maxMessages + 1);
 
     for (let i = startIdx; i <= upToMessageId; i++) {
@@ -657,9 +1043,32 @@ function buildContextMessages(upToMessageId) {
 }
 
 function buildContextText(upToMessageId) {
-    const maxMessages = 10;
-    const startIdx = Math.max(0, upToMessageId - maxMessages + 1);
     let text = '';
+
+    // 페르소나 정보 추가
+    const personaInfo = getPersonaInfo();
+    if (personaInfo) {
+        text += '=== USER/PERSONA INFORMATION ===\n' + personaInfo + '\n\n';
+    }
+
+    // 캐릭터 정보 추가
+    const charInfo = getCharacterInfo();
+    if (charInfo) {
+        text += '=== CHARACTER INFORMATION ===\n' + charInfo;
+    }
+
+    // 월드인포 컨텍스트 추가
+    const worldInfoContext = getWorldInfoContext();
+    if (worldInfoContext) {
+        text += worldInfoContext + '\n\n';
+    } else if (charInfo) {
+        text += '\n\n';
+    }
+
+    // 최근 대화 내역 추가
+    text += '=== RECENT CONVERSATION ===\n';
+    const maxMessages = extensionSettings.contextMessages || 20;
+    const startIdx = Math.max(0, upToMessageId - maxMessages + 1);
 
     for (let i = startIdx; i <= upToMessageId; i++) {
         const msg = globalContext.chat[i];
@@ -748,7 +1157,7 @@ function createTMIHTML(messageId, tmiItems, visible = false) {
     const header = $('<div class="tmi-header"></div>');
     const title = $('<span class="tmi-title"></span>');
 
-    title.append('📝 TMI (Too Much Information)');
+    title.append('📝 TMI ');
     title.append(`<span class="tmi-toggle-icon ${visible ? 'expanded' : ''}">▼</span>`);
 
     const controls = $('<div class="tmi-controls"></div>');
@@ -785,8 +1194,31 @@ function createLoadingHTML() {
     return $('<div class="tmi-container"><div class="tmi-loading">TMI 생성 중...</div></div>');
 }
 
-function createErrorHTML(errorMessage) {
-    return $('<div class="tmi-container"><div class="tmi-error">오류: ' + escapeHtml(errorMessage) + '</div></div>');
+function createErrorHTML(errorMessage, messageId) {
+    const container = $('<div class="tmi-container"></div>');
+    const errorDiv = $('<div class="tmi-error"></div>');
+
+    errorDiv.append($('<span></span>').text('❌ 오류: ' + errorMessage));
+
+    const retryButton = $('<button class="tmi-error-retry" title="재생성">🔄 재시도</button>');
+    retryButton.on('click', async function() {
+        $(this).prop('disabled', true).text('생성 중...');
+        container.remove();
+
+        // 기존 TMI 데이터 삭제
+        const tmiKey = getTMIKey(messageId);
+        if (tmiKey && extensionSettings.tmiData?.[tmiKey]) {
+            delete extensionSettings.tmiData[tmiKey];
+            saveSettings();
+        }
+
+        await generateTMI(messageId);
+    });
+
+    errorDiv.append(retryButton);
+    container.append(errorDiv);
+
+    return container;
 }
 
 function attachTMIEventHandlers(messageId) {
@@ -803,8 +1235,9 @@ function attachTMIEventHandlers(messageId) {
         toggleIcon.toggleClass('expanded');
 
         // settings.json에만 상태 저장
-        if (extensionSettings.tmiData && extensionSettings.tmiData[messageId]) {
-            extensionSettings.tmiData[messageId].visible = isCollapsed;
+        const tmiKey = getTMIKey(messageId);
+        if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
+            extensionSettings.tmiData[tmiKey].visible = isCollapsed;
             saveSettings();
         }
     });
@@ -815,8 +1248,9 @@ function attachTMIEventHandlers(messageId) {
         button.addClass('spinning');
 
         // settings.json에서 기존 TMI 데이터 삭제
-        if (extensionSettings.tmiData && extensionSettings.tmiData[messageId]) {
-            delete extensionSettings.tmiData[messageId];
+        const tmiKey = getTMIKey(messageId);
+        if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
+            delete extensionSettings.tmiData[tmiKey];
             saveSettings();
         }
 
@@ -830,10 +1264,11 @@ function restoreAllTMI() {
 
     let restoredCount = 0;
     globalContext.chat.forEach((message, messageId) => {
-        // settings.json에서만 가져오기
-        if (extensionSettings.tmiData && extensionSettings.tmiData[messageId]) {
-            const tmiData = extensionSettings.tmiData[messageId].items;
-            const visible = extensionSettings.tmiData[messageId].visible !== false;
+        // settings.json에서만 가져오기 (채팅방별, 스와이프별로 저장됨)
+        const tmiKey = getTMIKey(messageId);
+        if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
+            const tmiData = extensionSettings.tmiData[tmiKey].items;
+            const visible = extensionSettings.tmiData[tmiKey].visible !== false;
             // DOM 요소가 존재하는지 확인
             const messageElement = $(`[mesid="${messageId}"] .mes_text`);
             if (messageElement.length === 0) {
@@ -855,26 +1290,33 @@ function restoreAllTMI() {
     console.log(`[${EXTENSION_NAME}] TMI 복원 완료: ${restoredCount}개 복원됨`);
 }
 
-function cleanupOldTMIData() {
-    if (!extensionSettings.tmiData) return;
+function clearCurrentChatTMI() {
+    if (!extensionSettings.tmiData) return 0;
 
-    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-    let cleanedCount = 0;
+    const chatId = getCurrentChatId();
+    if (!chatId) return 0;
 
-    Object.keys(extensionSettings.tmiData).forEach(messageId => {
-        const tmiEntry = extensionSettings.tmiData[messageId];
+    let clearedCount = 0;
+    const chatPrefix = `${chatId}__`;
 
-        // 30일 이상 된 데이터 삭제
-        if (tmiEntry.timestamp && tmiEntry.timestamp < thirtyDaysAgo) {
-            delete extensionSettings.tmiData[messageId];
-            cleanedCount++;
+    // 현재 채팅 ID로 시작하는 모든 키 삭제
+    Object.keys(extensionSettings.tmiData).forEach(key => {
+        if (key.startsWith(chatPrefix)) {
+            delete extensionSettings.tmiData[key];
+            clearedCount++;
         }
     });
 
-    if (cleanedCount > 0) {
-        console.log(`[${EXTENSION_NAME}] 오래된 TMI 데이터 ${cleanedCount}개 정리됨`);
-        saveSettings();
-    }
+    return clearedCount;
+}
+
+function clearAllTMI() {
+    if (!extensionSettings.tmiData) return 0;
+
+    const totalCount = Object.keys(extensionSettings.tmiData).length;
+    extensionSettings.tmiData = {};
+
+    return totalCount;
 }
 
 jQuery(async () => {
