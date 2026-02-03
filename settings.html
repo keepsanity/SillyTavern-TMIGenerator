@@ -1,0 +1,87 @@
+<div class="tmi_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>TMI Generator Settings</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <!-- Extension 활성화 -->
+            <label class="checkbox_label" for="tmi_extension_enabled">
+                <input type="checkbox" id="tmi_extension_enabled" class="extension_enabled" checked />
+                <span><strong>Extension 활성화</strong></span>
+            </label>
+            <small class="notes">TMI Generator를 활성화/비활성화합니다</small>
+            
+            <hr class="m-t-1 m-b-1">
+
+            <!-- Generation Source -->
+            <div>
+                <label for="tmi_source">Generation Source</label>
+                <small class="notes">TMI 생성에 사용할 API를 선택하세요</small>
+            </div>
+            <select id="tmi_source" class="text_pole source_select">
+                <option value="main">Main API (현재 채팅 API)</option>
+                <option value="profile">Connection Profile (별도 프로필)</option>
+            </select>
+
+            <!-- Connection Profile (조건부 표시) -->
+            <div id="tmi_profile_settings" style="display: none; margin-top: 8px;">
+                <label for="tmi_connection_profile">Connection Profile</label>
+                <select id="tmi_connection_profile" class="text_pole connection_profile"></select>
+            </div>
+
+            <hr class="m-t-1 m-b-1">
+
+            <!-- Auto-generate -->
+            <label class="checkbox_label" for="tmi_auto_generate">
+                <input type="checkbox" id="tmi_auto_generate" class="auto_generate" checked />
+                <span>AI 답장 시 자동으로 TMI 생성</span>
+            </label>
+
+            <!-- Auto-open -->
+            <label class="checkbox_label" for="tmi_auto_open">
+                <input type="checkbox" id="tmi_auto_open" class="auto_open" />
+                <span>생성된 TMI를 자동으로 펼쳐서 표시</span>
+            </label>
+
+            <hr class="m-t-1 m-b-1">
+
+            <!-- 최대 토큰 수 -->
+            <div>
+                <label for="tmi_max_tokens">최대 응답 토큰 수</label>
+            </div>
+            <input id="tmi_max_tokens" type="number" class="text_pole max_tokens" min="50" max="2000" step="50" value="500" />
+
+            <!-- TMI 생성 프롬프트 -->
+            <div class="title_restorable">
+                <label for="tmi_prompt">TMI 생성 프롬프트</label>
+                <button class="menu_button fa-solid fa-undo interactable restore_prompt" title="기본 프롬프트로 복원"></button>
+            </div>
+            <small class="notes">
+                AI에게 특정 구조로 답장하도록 지시합니다<br>
+                <code>&lt;tmi&gt;</code> 태그 안에 리스트 형태로 반환하도록 프롬프트 작성
+            </small>
+            <textarea id="tmi_prompt" class="text_pole textarea_compact prompt" rows="10"></textarea>
+
+            <hr class="m-t-1 m-b-1">
+
+            <!-- HTML 템플릿 -->
+            <div class="title_restorable">
+                <label for="tmi_html_template">HTML 템플릿</label>
+                <button class="menu_button fa-solid fa-undo interactable restore_html" title="기본 HTML 템플릿으로 복원"></button>
+            </div>
+            <small class="notes">
+                각 TMI 항목의 표시 형식<br>
+                <code>{{this}}</code>: 현재 TMI 텍스트
+            </small>
+            <textarea id="tmi_html_template" class="text_pole textarea_compact html_template" rows="4"></textarea>
+
+            <!-- Custom CSS -->
+            <div class="title_restorable">
+                <label for="tmi_custom_css">Custom CSS</label>
+                <button class="menu_button fa-solid fa-undo interactable restore_css" title="기본 CSS로 복원"></button>
+            </div>
+            <textarea id="tmi_custom_css" class="text_pole textarea_compact custom_css" rows="6"></textarea>
+        </div>
+    </div>
+</div>
