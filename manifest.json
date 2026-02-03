@@ -5,8 +5,9 @@
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "SillyTavern Community",
+    "author": "keepsanity",
     "version": "1.0.0",
-    "homePage": "https://github.com/SillyTavern/SillyTavern"
+    "homePage": "",
+    "auto_update": false
 }
 

@@ -4,7 +4,9 @@
  */
 
 import { event_types } from '../../../events.js';
-import { generateQuietPrompt, getCurrentChatId } from '../../../../script.js';
+import { generateQuietPrompt, getCurrentChatId, user_avatar } from '../../../../script.js';
+import { power_user } from '../../../power-user.js';
+import { getWorldInfoPrompt } from '../../../world-info.js';
 
 const EXTENSION_NAME = 'SillyTavern-TMIGenerator';
 
@@ -145,6 +147,7 @@ const DEFAULT_SETTINGS = {
     maxTokens: 500,
     tmiCount: 3, // TMI 개수 (1-10)
     tmiLength: 'medium', // TMI 길이 ('short', 'medium', 'long')
+    language: 'en', // TMI 출력 언어 ('en', 'ko')
     prompt: DEFAULT_PROMPT,
     htmlTemplate: DEFAULT_HTML_TEMPLATE,
     customCss: DEFAULT_CSS,
@@ -336,6 +339,13 @@ async function loadSettingsUI() {
         .val(extensionSettings.tmiLength)
         .on('change', function() {
             extensionSettings.tmiLength = $(this).val();
+            saveSettings();
+        });
+
+    settingsContainer.find('.tmi_language')
+        .val(extensionSettings.language || 'en')
+        .on('change', function() {
+            extensionSettings.language = $(this).val();
             saveSettings();
         });
 
@@ -692,19 +702,23 @@ function initializeEventListeners() {
         const messageElement = $(`[mesid="${messageId}"] .mes_text`);
         messageElement.find('.tmi-container').remove();
 
-        // 현재 스와이프의 TMI 확인
+        // 현재 스와이프의 기존 TMI만 확인 (새로 생성하지 않음)
         const tmiKey = getTMIKey(messageId);
         if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
             const tmiEntry = extensionSettings.tmiData[tmiKey];
             renderTMI(messageId, tmiEntry.items, tmiEntry.visible);
-        } else if (tmiKey && extensionSettings.autoGenerate) {
-            // 자동 생성이 켜져 있으면 새로 생성
-            setTimeout(() => generateTMI(messageId), 500);
         }
+        // 기존 TMI가 없으면 아무것도 안 함 → CHARACTER_MESSAGE_RENDERED에서 생성됨
     });
 }
 
 function buildFullPrompt() {
+    // 언어 설정
+    const language = extensionSettings.language || 'en';
+    const languageInstruction = language === 'ko'
+        ? '⚠️ IMPORTANT: 모든 TMI 항목을 한국어로 작성하세요.'
+        : '⚠️ IMPORTANT: Write all TMI facts in English.';
+
     // 길이 조건
     const lengthInstructions = {
         'short': '1-2 sentences per fact (keep it brief)',
@@ -714,6 +728,8 @@ function buildFullPrompt() {
 
     // 전체 프롬프트 조합
     const fullPrompt = `${globalContext.substituteParams(extensionSettings.prompt)}
+
+${languageInstruction}
 
 CRITICAL FORMAT - You MUST use this EXACT structure:
 <tmi>
@@ -765,32 +781,74 @@ async function generateTMI(messageId) {
         let result = '';
 
         if (extensionSettings.source === 'main') {
-            // Main API 사용
-            const contextText = buildContextText(messageId);
-            const promptWithContext = contextText + '\n\n' + fullPrompt;
+            // Main API 사용 - generateRaw로 깔끔하게 (로어북 포함)
+            const contextText = await buildContextText(messageId);
 
-            result = await generateQuietPrompt({
-                quietPrompt: promptWithContext,
-                responseLength: extensionSettings.maxTokens,
+            console.log(`[${EXTENSION_NAME}] Main API (generateRaw) 요청 (컨텍스트 길이: ${contextText.length}자)`);
+
+            const { generateRaw } = globalContext;
+            if (!generateRaw) {
+                throw new Error('generateRaw is not available');
+            }
+
+            result = await generateRaw({
+                systemPrompt: contextText,  // 페르소나, 캐릭터, 대화 컨텍스트
+                prompt: fullPrompt,          // TMI 생성 프롬프트
+                streaming: false
             });
+
+            console.log(`[${EXTENSION_NAME}] Main API 응답 (길이: ${result?.length || 0}자):`, result?.substring(0, 200));
         } else {
-            // Connection Profile 사용
-            const contextMessages = buildContextMessages(messageId);
+            // Connection Profile 사용 (로어북 포함)
+            const contextMessages = await buildContextMessages(messageId);
             contextMessages.push({
                 role: 'user',
                 content: fullPrompt,
+            });
+
+            console.log(`[${EXTENSION_NAME}] Connection Profile 요청:`, {
+                profileId: extensionSettings.profileId,
+                messages: contextMessages.length,
+                maxTokens: extensionSettings.maxTokens,
+                lastMessage: contextMessages[contextMessages.length - 1]?.content?.substring(0, 100)
             });
 
             const response = await globalContext.ConnectionManagerRequestService.sendRequest(
                 extensionSettings.profileId,
                 contextMessages,
                 extensionSettings.maxTokens,
-                { stream: false, extractData: true }
+                {
+                    stream: false,
+                    extractData: true,
+                    includePreset: false,  // 프리셋 제외 ✅
+                    includeInstruct: false // instruct 제외 ✅
+                }
             );
 
-            result = response.content;
+            console.log(`[${EXTENSION_NAME}] Connection Profile 응답:`, {
+                response_type: typeof response,
+                has_content: !!response?.content,
+                content_length: response?.content?.length || 0,
+                response_keys: response ? Object.keys(response) : [],
+                full_response: response
+            });
+
+            // 여러 형식 지원
+            if (typeof response === 'string') {
+                result = response;
+            } else if (response?.choices?.[0]?.message) {
+                const msg = response.choices[0].message;
+                result = msg.reasoning_content || msg.content || '';
+            } else {
+                result = response?.content || response?.message || '';
+            }
+
+            if (!result) {
+                console.error(`[${EXTENSION_NAME}] Connection Profile 응답이 비어있습니다!`, response);
+            }
         }
 
+        console.log(`[${EXTENSION_NAME}] 파싱 전 result:`, { length: result?.length || 0, preview: result?.substring(0, 200) });
         const tmiItems = parseTMIResponse(result);
 
         if (tmiItems && tmiItems.length > 0) {
@@ -825,22 +883,14 @@ async function generateTMI(messageId) {
 
 function getPersonaInfo() {
     try {
-        // 실행 시점의 최신 context와 전역 변수 가져오기
-        const context = SillyTavern.getContext();
-
-        // user_avatar는 전역 변수에서, power_user도 전역에서
-        // @ts-ignore - 전역 변수
-        const userAvatar = context.accountStorage?.getItem?.('user_avatar') || globalThis.user_avatar;
-        // @ts-ignore - 전역 변수
-        const powerUser = globalThis.power_user;
-
         console.log(`[${EXTENSION_NAME}] 페르소나 정보 수집:`, {
-            user_avatar: userAvatar,
-            has_power_user: !!powerUser,
-            power_user_keys: powerUser ? Object.keys(powerUser).slice(0, 5) : []
+            user_avatar: user_avatar,
+            has_power_user: !!power_user,
+            has_personas: !!power_user?.personas,
+            power_user_keys: power_user ? Object.keys(power_user).slice(0, 10) : []
         });
 
-        if (!userAvatar || !powerUser) {
+        if (!user_avatar || !power_user) {
             console.log(`[${EXTENSION_NAME}] 페르소나 정보 없음`);
             return '';
         }
@@ -848,16 +898,16 @@ function getPersonaInfo() {
         let info = '';
 
         // 페르소나 이름
-        const personaName = powerUser.personas?.[userAvatar] || powerUser.name || 'User';
+        const personaName = power_user.personas?.[user_avatar] || power_user.name || 'User';
         info += `User/Persona: ${personaName}\n`;
 
         // 페르소나 설명
-        const personaDesc = powerUser.persona_descriptions?.[userAvatar];
+        const personaDesc = power_user.persona_descriptions?.[user_avatar];
         if (personaDesc?.description) {
             info += `\nPersona Description:\n${personaDesc.description}\n`;
-        } else if (powerUser.persona_description) {
+        } else if (power_user.persona_description) {
             // 폴백: 전역 persona_description
-            info += `\nPersona Description:\n${powerUser.persona_description}\n`;
+            info += `\nPersona Description:\n${power_user.persona_description}\n`;
         }
 
         console.log(`[${EXTENSION_NAME}] 페르소나 정보 (${info.length}자):`, info.substring(0, 100));
@@ -957,45 +1007,7 @@ function getCharacterInfo() {
     }
 }
 
-function getWorldInfoContext() {
-    try {
-        const context = SillyTavern.getContext();
-        let info = '';
-
-        // @ts-ignore - 전역 변수
-        const selectedWorldInfo = globalThis.selected_world_info || [];
-        // @ts-ignore - 전역 변수
-        const chatMetadata = context.chatMetadata || globalThis.chat_metadata || {};
-
-        // 전역 World Info
-        if (selectedWorldInfo && selectedWorldInfo.length > 0) {
-            info += `\n\nActive World Info: ${selectedWorldInfo.join(', ')}`;
-        }
-
-        // 채팅별 Lorebook
-        if (chatMetadata.world_info) {
-            info += `\nChat Lorebook: ${chatMetadata.world_info}`;
-        }
-
-        // 채팅 메타데이터 (컨텍스트 정보)
-        if (chatMetadata.scenario) {
-            info += `\n\nChat Scenario: ${chatMetadata.scenario}`;
-        }
-
-        console.log(`[${EXTENSION_NAME}] 월드인포 컨텍스트:`, {
-            selected_world_info: selectedWorldInfo,
-            chat_lorebook: chatMetadata.world_info,
-            has_scenario: !!chatMetadata.scenario
-        });
-
-        return info;
-    } catch (error) {
-        console.error(`[${EXTENSION_NAME}] 월드인포 컨텍스트 가져오기 실패:`, error);
-        return '';
-    }
-}
-
-function buildContextMessages(upToMessageId) {
+async function buildContextMessages(upToMessageId) {
     const messages = [];
 
     // 페르소나 정보 추가
@@ -1004,10 +1016,43 @@ function buildContextMessages(upToMessageId) {
     // 캐릭터 정보 추가
     const charInfo = getCharacterInfo();
 
-    // 월드인포 컨텍스트 추가
-    const worldInfoContext = getWorldInfoContext();
+    // 로어북 정보 추가
+    let worldInfoText = '';
+    try {
+        console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 가져오기 시도...`);
 
-    if (personaInfo || charInfo || worldInfoContext) {
+        // chat을 문자열 배열로 변환
+        const chatText = globalContext.chat.map(msg => msg?.mes || '').filter(text => text);
+
+        const worldInfoResult = await getWorldInfoPrompt(
+            chatText,  // 문자열 배열 전달
+            8000,      // maxContext
+            true       // isDryRun
+        );
+
+        console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 결과:`, {
+            has_result: !!worldInfoResult,
+            has_string: !!worldInfoResult?.worldInfoString,
+            string_length: worldInfoResult?.worldInfoString?.length || 0,
+            result_keys: worldInfoResult ? Object.keys(worldInfoResult) : []
+        });
+
+        if (worldInfoResult?.worldInfoString) {
+            worldInfoText = worldInfoResult.worldInfoString.trim();
+            if (worldInfoText) {
+                console.log(`[${EXTENSION_NAME}] ✅ Connection Profile: 로어북 포함됨 (${worldInfoText.length}자)`);
+            } else {
+                console.log(`[${EXTENSION_NAME}] ⚠️ Connection Profile: worldInfoString이 비어있음`);
+            }
+        } else {
+            console.log(`[${EXTENSION_NAME}] ⚠️ Connection Profile: worldInfoString 없음`);
+        }
+    } catch (error) {
+        console.error(`[${EXTENSION_NAME}] ❌ Connection Profile: 로어북 가져오기 실패:`, error);
+    }
+
+    // 시스템 컨텍스트 구성
+    if (personaInfo || charInfo || worldInfoText) {
         let systemContent = '';
         if (personaInfo) {
             systemContent += personaInfo;
@@ -1016,8 +1061,9 @@ function buildContextMessages(upToMessageId) {
             if (systemContent) systemContent += '\n\n';
             systemContent += charInfo;
         }
-        if (worldInfoContext) {
-            systemContent += worldInfoContext;
+        if (worldInfoText) {
+            if (systemContent) systemContent += '\n\n=== WORLD INFO / LOREBOOKS ===\n';
+            systemContent += worldInfoText;
         }
 
         messages.push({
@@ -1042,7 +1088,7 @@ function buildContextMessages(upToMessageId) {
     return messages;
 }
 
-function buildContextText(upToMessageId) {
+async function buildContextText(upToMessageId) {
     let text = '';
 
     // 페르소나 정보 추가
@@ -1054,15 +1100,41 @@ function buildContextText(upToMessageId) {
     // 캐릭터 정보 추가
     const charInfo = getCharacterInfo();
     if (charInfo) {
-        text += '=== CHARACTER INFORMATION ===\n' + charInfo;
+        text += '=== CHARACTER INFORMATION ===\n' + charInfo + '\n\n';
     }
 
-    // 월드인포 컨텍스트 추가
-    const worldInfoContext = getWorldInfoContext();
-    if (worldInfoContext) {
-        text += worldInfoContext + '\n\n';
-    } else if (charInfo) {
-        text += '\n\n';
+    // 로어북 정보 추가 (활성화된 항목만)
+    try {
+        console.log(`[${EXTENSION_NAME}] Main API: 로어북 가져오기 시도...`);
+
+        // chat을 문자열 배열로 변환
+        const chatText = globalContext.chat.map(msg => msg?.mes || '').filter(text => text);
+
+        const worldInfoResult = await getWorldInfoPrompt(
+            chatText,  // 문자열 배열 전달
+            8000,      // maxContext (충분히 큰 값)
+            true       // isDryRun (실제 스캔하지만 카운터 업데이트 안 함)
+        );
+
+        console.log(`[${EXTENSION_NAME}] Main API: 로어북 결과:`, {
+            has_result: !!worldInfoResult,
+            has_string: !!worldInfoResult?.worldInfoString,
+            string_length: worldInfoResult?.worldInfoString?.length || 0
+        });
+
+        if (worldInfoResult?.worldInfoString) {
+            const wiText = worldInfoResult.worldInfoString.trim();
+            if (wiText) {
+                text += '=== WORLD INFO / LOREBOOKS ===\n' + wiText + '\n\n';
+                console.log(`[${EXTENSION_NAME}] ✅ Main API: 로어북 포함됨 (${wiText.length}자)`);
+            } else {
+                console.log(`[${EXTENSION_NAME}] ⚠️ Main API: worldInfoString이 비어있음`);
+            }
+        } else {
+            console.log(`[${EXTENSION_NAME}] ⚠️ Main API: worldInfoString 없음`);
+        }
+    } catch (error) {
+        console.error(`[${EXTENSION_NAME}] ❌ Main API: 로어북 가져오기 실패:`, error);
     }
 
     // 최근 대화 내역 추가
@@ -1083,24 +1155,47 @@ function buildContextText(upToMessageId) {
 }
 
 function parseTMIResponse(content) {
+    console.log(`[${EXTENSION_NAME}] parseTMIResponse 입력:`, content.substring(0, 200));
+
     // 1. <tmi>...</tmi> 태그 안의 내용 추출 (메인 파싱 방법)
     const tmiRegex = /<tmi>\s*([\s\S]*?)\s*<\/tmi>/i;
     const tmiMatch = content.match(tmiRegex);
 
     if (tmiMatch) {
         const tmiContent = tmiMatch[1];
-        // 리스트 항목 추출 (-, *, •, 숫자. 등)
-        const items = tmiContent
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => /^[-*•]\s+/.test(line) || /^\d+\.\s+/.test(line))
-            .map(line => line.replace(/^[-*•]\s*/, '').replace(/^\d+\.\s*/, '').trim())
-            .filter(line => line.length > 5);
+        console.log(`[${EXTENSION_NAME}] <tmi> 태그 내용 추출 성공, 길이: ${tmiContent.length}`);
 
+        // 리스트 항목 추출 (-, *, •, 숫자. 등)
+        const lines = tmiContent.split('\n');
+        console.log(`[${EXTENSION_NAME}] 줄 분리: ${lines.length}개 줄`);
+
+        const items = lines
+            .map(line => line.trim())
+            .filter(line => {
+                const isValid = /^[-*•]\s+/.test(line) || /^\d+\.\s+/.test(line);
+                if (!isValid && line.length > 0) {
+                    console.log(`[${EXTENSION_NAME}] 필터링됨 (형식 불일치): "${line.substring(0, 50)}..."`);
+                }
+                return isValid;
+            })
+            .map(line => line.replace(/^[-*•]\s*/, '').replace(/^\d+\.\s*/, '').trim())
+            .filter(line => {
+                const isValid = line.length > 5;
+                if (!isValid) {
+                    console.log(`[${EXTENSION_NAME}] 필터링됨 (너무 짧음): "${line}"`);
+                }
+                return isValid;
+            });
+
+        console.log(`[${EXTENSION_NAME}] 최종 파싱된 항목: ${items.length}개`);
         if (items.length > 0) {
             console.log(`[${EXTENSION_NAME}] Parsed ${items.length} TMI items from <tmi> tags`);
             return items.slice(0, extensionSettings.tmiCount || 10);
+        } else {
+            console.warn(`[${EXTENSION_NAME}] <tmi> 태그는 있지만 유효한 항목 없음`);
         }
+    } else {
+        console.warn(`[${EXTENSION_NAME}] <tmi> 태그를 찾을 수 없음`);
     }
 
     // 2. Fallback: 태그 없이 리스트만 있는 경우
@@ -1245,7 +1340,7 @@ function attachTMIEventHandlers(messageId) {
     container.find('.tmi-regenerate').off('click').on('click', async function(e) {
         e.stopPropagation();
         const button = $(this);
-        button.addClass('spinning');
+        button.prop('disabled', true);
 
         // settings.json에서 기존 TMI 데이터 삭제
         const tmiKey = getTMIKey(messageId);
@@ -1255,7 +1350,7 @@ function attachTMIEventHandlers(messageId) {
         }
 
         await generateTMI(messageId);
-        button.removeClass('spinning');
+        button.prop('disabled', false);
     });
 }
 
