@@ -1,0 +1,65 @@
+/* TMI Generator Extension - 최소 기본 스타일 */
+/* 대부분의 스타일은 설정의 Custom CSS에서 수정 가능합니다 */
+
+/* 애니메이션만 여기 정의 (CSS로만 가능) */
+@keyframes tmiSlideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes tmiSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes tmiPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+/* 재생성 버튼 스피닝 */
+.tmi-regenerate.spinning {
+    animation: tmiSpin 1s linear infinite;
+}
+
+/* 설정 패널 기본 레이아웃 */
+.tmi_settings {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.tmi_settings textarea {
+    min-height: 100px;
+    resize: vertical;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+}
+
+.tmi_settings .title_restorable {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 10px;
+}
+
+.tmi_settings .inline-drawer-content > div {
+    margin-bottom: 10px;
+}
+
+.tmi_settings label {
+    font-weight: 500;
+}
+
+.tmi_settings small.notes {
+    display: block;
+    margin-top: 3px;
+    opacity: 0.7;
+    font-size: 0.9em;
+}

@@ -11,7 +11,7 @@
                 <span><strong>Extension 활성화</strong></span>
             </label>
             <small class="notes">TMI Generator를 활성화/비활성화합니다</small>
-            
+
             <hr class="m-t-1 m-b-1">
 
             <!-- Generation Source -->
@@ -46,35 +46,73 @@
 
             <hr class="m-t-1 m-b-1">
 
+            <!-- TMI 개수 -->
+            <div>
+                <label for="tmi_count">TMI 개수</label>
+                <small class="notes">생성할 TMI 항목 개수</small>
+            </div>
+            <select id="tmi_count" class="text_pole tmi_count">
+                <option value="1">1개</option>
+                <option value="2">2개</option>
+                <option value="3" selected>3개</option>
+                <option value="4">4개</option>
+                <option value="5">5개</option>
+                <option value="6">6개</option>
+                <option value="7">7개</option>
+                <option value="8">8개</option>
+                <option value="9">9개</option>
+                <option value="10">10개</option>
+            </select>
+
+            <!-- TMI 길이 -->
+            <div>
+                <label for="tmi_length">TMI 항목당 길이</label>
+                <small class="notes">각 항목의 길이 제한</small>
+            </div>
+            <select id="tmi_length" class="text_pole tmi_length">
+                <option value="short">짧게 (1-2줄)</option>
+                <option value="medium" selected>중간 (3-5줄)</option>
+                <option value="long">길게 (7줄 이상)</option>
+            </select>
+
             <!-- 최대 토큰 수 -->
             <div>
                 <label for="tmi_max_tokens">최대 응답 토큰 수</label>
             </div>
             <input id="tmi_max_tokens" type="number" class="text_pole max_tokens" min="50" max="2000" step="50" value="500" />
 
-            <!-- TMI 생성 프롬프트 -->
-            <div class="title_restorable">
-                <label for="tmi_prompt">TMI 생성 프롬프트</label>
-                <button class="menu_button fa-solid fa-undo interactable restore_prompt" title="기본 프롬프트로 복원"></button>
+            <hr class="m-t-1 m-b-1">
+
+            <!-- 프리셋 관리 -->
+            <div>
+                <label>프리셋 관리</label>
+                <small class="notes">프롬프트 + CSS를 세트로 저장/불러오기</small>
             </div>
-            <small class="notes">
-                AI에게 특정 구조로 답장하도록 지시합니다<br>
-                <code>&lt;tmi&gt;</code> 태그 안에 리스트 형태로 반환하도록 프롬프트 작성
-            </small>
-            <textarea id="tmi_prompt" class="text_pole textarea_compact prompt" rows="10"></textarea>
+            <div style="display: flex; gap: 6px; margin-top: 6px; margin-bottom: 10px;">
+                <select id="tmi_preset_select" class="text_pole preset_select" style="flex: 1;">
+                    <!-- 프리셋 목록은 JavaScript로 동적 생성됨 -->
+                </select>
+                <button class="menu_button interactable preset_save" title="현재 설정을 새 프리셋으로 저장">
+                    <i class="fa-solid fa-floppy-disk"></i>
+                </button>
+                <button class="menu_button interactable preset_delete" title="선택한 프리셋 삭제">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
 
             <hr class="m-t-1 m-b-1">
 
-            <!-- HTML 템플릿 -->
+            <!-- TMI 생성 프롬프트 -->
             <div class="title_restorable">
-                <label for="tmi_html_template">HTML 템플릿</label>
-                <button class="menu_button fa-solid fa-undo interactable restore_html" title="기본 HTML 템플릿으로 복원"></button>
+                <label for="tmi_prompt">커스텀 프롬프트</label>
+                <button class="menu_button fa-solid fa-undo interactable restore_prompt" title="기본 프롬프트로 복원"></button>
             </div>
             <small class="notes">
-                각 TMI 항목의 표시 형식<br>
-                <code>{{this}}</code>: 현재 TMI 텍스트
+                어떤 종류의 TMI를 생성할지 설명합니다
             </small>
-            <textarea id="tmi_html_template" class="text_pole textarea_compact html_template" rows="4"></textarea>
+            <textarea id="tmi_prompt" class="text_pole textarea_compact prompt" rows="6"></textarea>
+
+            <hr class="m-t-1 m-b-1">
 
             <!-- Custom CSS -->
             <div class="title_restorable">
