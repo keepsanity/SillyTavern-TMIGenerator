@@ -88,8 +88,9 @@
             <!-- 최대 토큰 수 -->
             <div>
                 <label for="tmi_max_tokens">최대 응답 토큰 수</label>
+                <small class="notes">TMI 생성 시 사용할 최대 토큰 수 (기본 1500)</small>
             </div>
-            <input id="tmi_max_tokens" type="number" class="text_pole max_tokens" min="50" max="2000" step="50" value="500" />
+            <input id="tmi_max_tokens" type="number" class="text_pole max_tokens" min="0" max="7000" step="50" value="1500" />
 
             <!-- 컨텍스트 메시지 수 -->
             <div style="margin-top: 10px;">

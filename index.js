@@ -144,7 +144,7 @@ const DEFAULT_SETTINGS = {
     source: 'main',
     profileId: '',
     autoGenerate: true,
-    maxTokens: 500,
+    maxTokens: 1500,
     tmiCount: 3, // TMI 개수 (1-10)
     tmiLength: 'medium', // TMI 길이 ('short', 'medium', 'long')
     language: 'en', // TMI 출력 언어 ('en', 'ko')
