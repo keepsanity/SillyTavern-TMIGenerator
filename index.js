@@ -1093,38 +1093,48 @@ async function buildContextMessages(upToMessageId) {
 
     // 로어북 정보 추가
     let worldInfoText = '';
-    try {
-        console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 가져오기 시도...`);
+    // chat이 비어있지 않은 경우에만 로어북 시도
+    if (globalContext.chat && globalContext.chat.length > 0) {
+        try {
+            console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 가져오기 시도...`);
 
-        // chat을 문자열 배열로 변환
-        const chatText = globalContext.chat.map(msg => msg?.mes || '').filter(text => text);
+            // chat을 문자열 배열로 변환
+            const chatText = globalContext.chat.map(msg => msg?.mes || '').filter(text => text);
 
-        const worldInfoResult = await getWorldInfoPrompt(
-            chatText,  // 문자열 배열 전달
-            8000,      // maxContext
-            true,      // isDryRun
-            null       // globalScanData
-        );
-
-        console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 결과:`, {
-            has_result: !!worldInfoResult,
-            has_string: !!worldInfoResult?.worldInfoString,
-            string_length: worldInfoResult?.worldInfoString?.length || 0,
-            result_keys: worldInfoResult ? Object.keys(worldInfoResult) : []
-        });
-
-        if (worldInfoResult?.worldInfoString) {
-            worldInfoText = worldInfoResult.worldInfoString.trim();
-            if (worldInfoText) {
-                console.log(`[${EXTENSION_NAME}] ✅ Connection Profile: 로어북 포함됨 (${worldInfoText.length}자)`);
+            // chatText가 비어있으면 건너뛰기
+            if (chatText.length === 0) {
+                console.log(`[${EXTENSION_NAME}] ⚠️ Connection Profile: chat 메시지가 없어 로어북 스캔 건너뜀`);
             } else {
-                console.log(`[${EXTENSION_NAME}] ⚠️ Connection Profile: worldInfoString이 비어있음`);
+                const worldInfoResult = await getWorldInfoPrompt(
+                    chatText,  // 문자열 배열 전달
+                    8000,      // maxContext
+                    true,      // isDryRun
+                    null       // globalScanData
+                );
+
+                console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 결과:`, {
+                    has_result: !!worldInfoResult,
+                    has_string: !!worldInfoResult?.worldInfoString,
+                    string_length: worldInfoResult?.worldInfoString?.length || 0,
+                    result_keys: worldInfoResult ? Object.keys(worldInfoResult) : []
+                });
+
+                if (worldInfoResult?.worldInfoString) {
+                    worldInfoText = worldInfoResult.worldInfoString.trim();
+                    if (worldInfoText) {
+                        console.log(`[${EXTENSION_NAME}] ✅ Connection Profile: 로어북 포함됨 (${worldInfoText.length}자)`);
+                    } else {
+                        console.log(`[${EXTENSION_NAME}] ⚠️ Connection Profile: worldInfoString이 비어있음`);
+                    }
+                } else {
+                    console.log(`[${EXTENSION_NAME}] ⚠️ Connection Profile: worldInfoString 없음`);
+                }
             }
-        } else {
-            console.log(`[${EXTENSION_NAME}] ⚠️ Connection Profile: worldInfoString 없음`);
+        } catch (error) {
+            console.error(`[${EXTENSION_NAME}] ❌ Connection Profile: 로어북 가져오기 실패 (무시하고 계속):`, error);
         }
-    } catch (error) {
-        console.error(`[${EXTENSION_NAME}] ❌ Connection Profile: 로어북 가져오기 실패:`, error);
+    } else {
+        console.log(`[${EXTENSION_NAME}] ⚠️ Connection Profile: chat이 비어있어 로어북 건너뜀`);
     }
 
     // 시스템 컨텍스트 구성
@@ -1180,38 +1190,48 @@ async function buildContextText(upToMessageId) {
     }
 
     // 로어북 정보 추가 (활성화된 항목만)
-    try {
-        console.log(`[${EXTENSION_NAME}] Main API: 로어북 가져오기 시도...`);
+    // chat이 비어있지 않은 경우에만 로어북 시도
+    if (globalContext.chat && globalContext.chat.length > 0) {
+        try {
+            console.log(`[${EXTENSION_NAME}] Main API: 로어북 가져오기 시도...`);
 
-        // chat을 문자열 배열로 변환
-        const chatText = globalContext.chat.map(msg => msg?.mes || '').filter(text => text);
+            // chat을 문자열 배열로 변환
+            const chatText = globalContext.chat.map(msg => msg?.mes || '').filter(text => text);
 
-        const worldInfoResult = await getWorldInfoPrompt(
-            chatText,  // 문자열 배열 전달
-            8000,      // maxContext (충분히 큰 값)
-            true,      // isDryRun (실제 스캔하지만 카운터 업데이트 안 함)
-            null       // globalScanData
-        );
-
-        console.log(`[${EXTENSION_NAME}] Main API: 로어북 결과:`, {
-            has_result: !!worldInfoResult,
-            has_string: !!worldInfoResult?.worldInfoString,
-            string_length: worldInfoResult?.worldInfoString?.length || 0
-        });
-
-        if (worldInfoResult?.worldInfoString) {
-            const wiText = worldInfoResult.worldInfoString.trim();
-            if (wiText) {
-                text += '=== WORLD INFO / LOREBOOKS ===\n' + wiText + '\n\n';
-                console.log(`[${EXTENSION_NAME}] ✅ Main API: 로어북 포함됨 (${wiText.length}자)`);
+            // chatText가 비어있으면 건너뛰기
+            if (chatText.length === 0) {
+                console.log(`[${EXTENSION_NAME}] ⚠️ Main API: chat 메시지가 없어 로어북 스캔 건너뜀`);
             } else {
-                console.log(`[${EXTENSION_NAME}] ⚠️ Main API: worldInfoString이 비어있음`);
+                const worldInfoResult = await getWorldInfoPrompt(
+                    chatText,  // 문자열 배열 전달
+                    8000,      // maxContext (충분히 큰 값)
+                    true,      // isDryRun (실제 스캔하지만 카운터 업데이트 안 함)
+                    null       // globalScanData
+                );
+
+                console.log(`[${EXTENSION_NAME}] Main API: 로어북 결과:`, {
+                    has_result: !!worldInfoResult,
+                    has_string: !!worldInfoResult?.worldInfoString,
+                    string_length: worldInfoResult?.worldInfoString?.length || 0
+                });
+
+                if (worldInfoResult?.worldInfoString) {
+                    const wiText = worldInfoResult.worldInfoString.trim();
+                    if (wiText) {
+                        text += '=== WORLD INFO / LOREBOOKS ===\n' + wiText + '\n\n';
+                        console.log(`[${EXTENSION_NAME}] ✅ Main API: 로어북 포함됨 (${wiText.length}자)`);
+                    } else {
+                        console.log(`[${EXTENSION_NAME}] ⚠️ Main API: worldInfoString이 비어있음`);
+                    }
+                } else {
+                    console.log(`[${EXTENSION_NAME}] ⚠️ Main API: worldInfoString 없음`);
+                }
             }
-        } else {
-            console.log(`[${EXTENSION_NAME}] ⚠️ Main API: worldInfoString 없음`);
+        } catch (error) {
+            console.error(`[${EXTENSION_NAME}] ❌ Main API: 로어북 가져오기 실패 (무시하고 계속):`, error);
         }
-    } catch (error) {
-        console.error(`[${EXTENSION_NAME}] ❌ Main API: 로어북 가져오기 실패:`, error);
+    } else {
+        console.log(`[${EXTENSION_NAME}] ⚠️ Main API: chat이 비어있어 로어북 건너뜀`);
     }
 
     // 최근 대화 내역 추가
