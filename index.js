@@ -326,6 +326,24 @@ async function loadSettingsUI() {
         .on('change', function() {
             extensionSettings.autoGenerate = $(this).prop('checked');
             saveSettings();
+
+            // 자동 생성 OFF → TMI 없는 메시지에 생성 버튼 표시
+            if (!extensionSettings.autoGenerate) {
+                globalContext.chat.forEach((message, messageId) => {
+                    if (!message.is_user) {
+                        const tmiKey = getTMIKey(messageId);
+                        // TMI가 없으면 생성 버튼 표시
+                        if (!tmiKey || !extensionSettings.tmiData?.[tmiKey]) {
+                            showGenerateButton(messageId);
+                        } else {
+                            hideGenerateButton(messageId);
+                        }
+                    }
+                });
+            } else {
+                // 자동 생성 ON → 생성 버튼 숨기기
+                $('.mes_tmi_generate').hide();
+            }
         });
 
     settingsContainer.find('.tmi_count')
@@ -418,6 +436,15 @@ async function loadSettingsUI() {
             // 화면에서도 TMI 제거
             $('.tmi-container').remove();
 
+            // 자동 생성이 꺼져 있으면 생성 버튼 표시
+            if (!extensionSettings.autoGenerate) {
+                globalContext.chat.forEach((message, messageId) => {
+                    if (!message.is_user) {
+                        showGenerateButton(messageId);
+                    }
+                });
+            }
+
             toastr.success(`현재 채팅방의 TMI ${clearedCount}개가 삭제되었습니다.`);
         }
     });
@@ -433,6 +460,15 @@ async function loadSettingsUI() {
 
             // 화면에서도 TMI 제거
             $('.tmi-container').remove();
+
+            // 자동 생성이 꺼져 있으면 생성 버튼 표시
+            if (!extensionSettings.autoGenerate) {
+                globalContext.chat.forEach((message, messageId) => {
+                    if (!message.is_user) {
+                        showGenerateButton(messageId);
+                    }
+                });
+            }
 
             toastr.success(`전체 TMI ${clearedCount}개가 삭제되었습니다.`);
         }
@@ -609,10 +645,43 @@ function injectCustomCSS() {
 }
 
 function initializeEventListeners() {
+    // TMI 생성 버튼을 message_template에 추가 (모든 새 메시지에 자동 포함)
+    const tmiButton = document.createElement('div');
+    tmiButton.title = 'TMI 생성';
+    tmiButton.className = 'mes_button mes_tmi_generate fa-solid fa-comment-dots interactable';
+    tmiButton.tabIndex = 0;
+    tmiButton.setAttribute('role', 'button');
+    document.querySelector('#message_template .mes_buttons .extraMesButtons')?.prepend(tmiButton);
+
+    // 글로벌 클릭 리스너로 TMI 버튼 처리
+    document.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (!target.classList.contains('mes_tmi_generate')) return;
+
+        const messageEl = target.closest('.mes');
+        if (!messageEl) return;
+
+        const messageId = Number(messageEl.getAttribute('mesid'));
+        if (isNaN(messageId)) return;
+
+        // 버튼 비활성화
+        target.classList.add('fa-spin');
+        target.style.pointerEvents = 'none';
+
+        await generateTMI(messageId);
+
+        // 생성 실패 시 버튼 복원
+        if (!$(`[mesid="${messageId}"] .tmi-container`).length) {
+            target.classList.remove('fa-spin');
+            target.style.pointerEvents = 'auto';
+        }
+    });
+
     globalContext.eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, async (messageId) => {
         console.log(`[${EXTENSION_NAME}] CHARACTER_MESSAGE_RENDERED:`, messageId);
 
-        if (!extensionSettings.enabled || !extensionSettings.autoGenerate) {
+        if (!extensionSettings.enabled) {
             return;
         }
 
@@ -626,12 +695,18 @@ function initializeEventListeners() {
         if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
             const tmiEntry = extensionSettings.tmiData[tmiKey];
             renderTMI(messageId, tmiEntry.items, tmiEntry.visible);
+            // TMI가 있으면 생성 버튼 숨기기
+            hideGenerateButton(messageId);
             return;
         }
 
         // 자동 생성이 켜져 있으면 새로 생성
-        if (extensionSettings.enabled && extensionSettings.autoGenerate) {
+        if (extensionSettings.autoGenerate) {
             await generateTMI(messageId);
+            hideGenerateButton(messageId);
+        } else {
+            // 자동 생성이 꺼져 있으면 생성 버튼 표시
+            showGenerateButton(messageId);
         }
     });
 
@@ -1027,7 +1102,8 @@ async function buildContextMessages(upToMessageId) {
         const worldInfoResult = await getWorldInfoPrompt(
             chatText,  // 문자열 배열 전달
             8000,      // maxContext
-            true       // isDryRun
+            true,      // isDryRun
+            null       // globalScanData
         );
 
         console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 결과:`, {
@@ -1113,7 +1189,8 @@ async function buildContextText(upToMessageId) {
         const worldInfoResult = await getWorldInfoPrompt(
             chatText,  // 문자열 배열 전달
             8000,      // maxContext (충분히 큰 값)
-            true       // isDryRun (실제 스캔하지만 카운터 업데이트 안 함)
+            true,      // isDryRun (실제 스캔하지만 카운터 업데이트 안 함)
+            null       // globalScanData
         );
 
         console.log(`[${EXTENSION_NAME}] Main API: 로어북 결과:`, {
@@ -1257,6 +1334,7 @@ function createTMIHTML(messageId, tmiItems, visible = false) {
 
     const controls = $('<div class="tmi-controls"></div>');
     controls.append('<button class="tmi-regenerate" title="TMI 재생성">🔄</button>');
+    controls.append('<button class="tmi-delete" title="TMI 삭제">❌</button>');
 
     header.append(title).append(controls);
     container.append(header);
@@ -1320,7 +1398,7 @@ function attachTMIEventHandlers(messageId) {
     const container = $(`[mesid="${messageId}"] .tmi-container`);
 
     container.find('.tmi-header').off('click').on('click', function(e) {
-        if ($(e.target).closest('.tmi-regenerate').length > 0) return;
+        if ($(e.target).closest('.tmi-regenerate, .tmi-delete').length > 0) return;
 
         const content = container.find('.tmi-content');
         const toggleIcon = container.find('.tmi-toggle-icon');
@@ -1352,12 +1430,38 @@ function attachTMIEventHandlers(messageId) {
         await generateTMI(messageId);
         button.prop('disabled', false);
     });
+
+    container.find('.tmi-delete').off('click').on('click', function(e) {
+        e.stopPropagation();
+
+        if (!confirm('이 TMI를 삭제하시겠습니까?')) {
+            return;
+        }
+
+        // settings.json에서 TMI 데이터 삭제
+        const tmiKey = getTMIKey(messageId);
+        if (tmiKey && extensionSettings.tmiData && extensionSettings.tmiData[tmiKey]) {
+            delete extensionSettings.tmiData[tmiKey];
+            saveSettings();
+        }
+
+        // DOM에서 제거
+        container.remove();
+
+        // 자동 생성이 꺼져 있으면 생성 버튼 표시
+        if (!extensionSettings.autoGenerate) {
+            showGenerateButton(messageId);
+        }
+
+        toastr.success('TMI가 삭제되었습니다');
+    });
 }
 
 function restoreAllTMI() {
     console.log(`[${EXTENSION_NAME}] TMI 복원 시작, 총 메시지: ${globalContext.chat.length}`);
 
     let restoredCount = 0;
+    let buttonCount = 0;
     globalContext.chat.forEach((message, messageId) => {
         // settings.json에서만 가져오기 (채팅방별, 스와이프별로 저장됨)
         const tmiKey = getTMIKey(messageId);
@@ -1379,10 +1483,18 @@ function restoreAllTMI() {
 
             renderTMI(messageId, tmiData, visible);
             restoredCount++;
+        } else {
+            // TMI가 없고 자동 생성이 꺼져 있으면 생성 버튼 표시
+            if (!extensionSettings.autoGenerate) {
+                showGenerateButton(messageId);
+                buttonCount++;
+            } else {
+                hideGenerateButton(messageId);
+            }
         }
     });
 
-    console.log(`[${EXTENSION_NAME}] TMI 복원 완료: ${restoredCount}개 복원됨`);
+    console.log(`[${EXTENSION_NAME}] TMI 복원 완료: ${restoredCount}개 복원됨, ${buttonCount}개 생성 버튼 추가됨`);
 }
 
 function clearCurrentChatTMI() {
@@ -1412,6 +1524,20 @@ function clearAllTMI() {
     extensionSettings.tmiData = {};
 
     return totalCount;
+}
+
+function showGenerateButton(messageId) {
+    const button = $(`[mesid="${messageId}"] .mes_tmi_generate`);
+    if (button.length > 0) {
+        button.show();
+    }
+}
+
+function hideGenerateButton(messageId) {
+    const button = $(`[mesid="${messageId}"] .mes_tmi_generate`);
+    if (button.length > 0) {
+        button.hide();
+    }
 }
 
 jQuery(async () => {

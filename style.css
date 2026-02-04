@@ -95,3 +95,38 @@
     opacity: 0.7;
     font-size: 0.9em;
 }
+
+/* TMI 재생성 버튼 애니메이션 제거 (disabled 상태로 처리) */
+.tmi-regenerate:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* TMI 삭제 버튼 */
+.tmi-delete {
+    background: transparent;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: all 0.2s ease;
+    color: var(--SmartThemeBodyColor);
+    margin-left: 4px;
+}
+
+.tmi-delete:hover {
+    background: rgba(255, 59, 48, 0.2);
+    border-color: rgba(255, 59, 48, 0.5);
+    transform: scale(1.05);
+}
+
+/* TMI 생성 버튼 (메시지 버튼 라인에 표시) */
+.mes_tmi_generate {
+    /* SillyTavern의 기본 .mes_button 스타일 사용 */
+}
+
+.mes_tmi_generate.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
