@@ -875,6 +875,13 @@ async function generateTMI(messageId) {
             const contextText = await buildContextText(messageId);
 
             console.log(`[${EXTENSION_NAME}] Main API (generateRaw) 요청 (컨텍스트 길이: ${contextText.length}자)`);
+            console.log(`[${EXTENSION_NAME}] 📋 Main API 컨텍스트 미리보기:`, contextText.substring(0, 500) + '...');
+
+            if (contextText.includes('WORLD INFO') || contextText.includes('LOREBOOK')) {
+                console.log(`[${EXTENSION_NAME}] ✅ 컨텍스트에 로어북 섹션 포함됨`);
+            } else {
+                console.warn(`[${EXTENSION_NAME}] ⚠️ 컨텍스트에 로어북 섹션이 없음!`);
+            }
 
             const { generateRaw } = globalContext;
             if (!generateRaw) {
@@ -903,6 +910,29 @@ async function generateTMI(messageId) {
                 lastMessage: contextMessages[contextMessages.length - 1]?.content?.substring(0, 100)
             });
 
+            // 디버깅: system 메시지 확인
+            const systemMsg = contextMessages.find(m => m.role === 'system');
+            if (systemMsg) {
+                console.log(`[${EXTENSION_NAME}] 📋 Connection Profile System 메시지 (${systemMsg.content.length}자):`,
+                    systemMsg.content.substring(0, 500) + '...');
+                if (systemMsg.content.includes('WORLD INFO') || systemMsg.content.includes('LOREBOOK')) {
+                    console.log(`[${EXTENSION_NAME}] ✅ System 메시지에 로어북 섹션 포함됨`);
+                } else {
+                    console.warn(`[${EXTENSION_NAME}] ⚠️ System 메시지에 로어북 섹션이 없음!`);
+                }
+            } else {
+                console.warn(`[${EXTENSION_NAME}] ⚠️ System 메시지가 없음!`);
+            }
+
+            // Connection Profile 서비스 체크
+            if (!globalContext.ConnectionManagerRequestService) {
+                throw new Error('Connection Manager가 로드되지 않았습니다. SillyTavern을 재시작해주세요.');
+            }
+
+            if (!extensionSettings.profileId) {
+                throw new Error('Connection Profile이 선택되지 않았습니다. 설정에서 프로필을 선택해주세요.');
+            }
+
             const response = await globalContext.ConnectionManagerRequestService.sendRequest(
                 extensionSettings.profileId,
                 contextMessages,
@@ -913,7 +943,10 @@ async function generateTMI(messageId) {
                     includePreset: false,  // 프리셋 제외 ✅
                     includeInstruct: false // instruct 제외 ✅
                 }
-            );
+            ).catch(err => {
+                console.error(`[${EXTENSION_NAME}] Connection Profile API 오류:`, err);
+                throw new Error(`Connection Profile 연결 실패: ${err.message || '알 수 없는 오류'}. 프로필 설정을 확인해주세요.`);
+            });
 
             console.log(`[${EXTENSION_NAME}] Connection Profile 응답:`, {
                 response_type: typeof response,
@@ -1124,7 +1157,7 @@ async function buildContextMessages(upToMessageId) {
                     chatText,  // 문자열 배열 전달
                     8000,      // maxContext
                     true,      // isDryRun
-                    null       // globalScanData
+                    undefined  // globalScanData → undefined면 기본값 적용됨
                 );
 
                 console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 결과:`, {
@@ -1153,6 +1186,15 @@ async function buildContextMessages(upToMessageId) {
     }
 
     // 시스템 컨텍스트 구성
+    console.log(`[${EXTENSION_NAME}] 🔍 Connection Profile 컨텍스트 구성:`, {
+        has_persona: !!personaInfo,
+        persona_length: personaInfo?.length || 0,
+        has_char: !!charInfo,
+        char_length: charInfo?.length || 0,
+        has_world: !!worldInfoText,
+        world_length: worldInfoText?.length || 0
+    });
+
     if (personaInfo || charInfo || worldInfoText) {
         let systemContent = '';
         if (personaInfo) {
@@ -1165,12 +1207,22 @@ async function buildContextMessages(upToMessageId) {
         if (worldInfoText) {
             if (systemContent) systemContent += '\n\n=== WORLD INFO / LOREBOOKS ===\n';
             systemContent += worldInfoText;
+            console.log(`[${EXTENSION_NAME}] ✅ 로어북이 systemContent에 추가됨`);
+        } else {
+            console.log(`[${EXTENSION_NAME}] ⚠️ worldInfoText가 비어있음, 로어북 추가 안 됨`);
         }
+
+        console.log(`[${EXTENSION_NAME}] 📋 최종 systemContent 길이: ${systemContent.length}자`);
+        console.log(`[${EXTENSION_NAME}] 📋 systemContent 미리보기:`, systemContent.substring(0, 300) + '...');
 
         messages.push({
             role: 'system',
             content: systemContent,
         });
+
+        console.log(`[${EXTENSION_NAME}] ✅ System 메시지 추가됨, 전체 messages 개수: ${messages.length}`);
+    } else {
+        console.log(`[${EXTENSION_NAME}] ⚠️ 페르소나/캐릭터/로어북 모두 비어있어 System 메시지 추가 안 됨`);
     }
 
     // 최근 대화 내역 추가
@@ -1221,7 +1273,7 @@ async function buildContextText(upToMessageId) {
                     chatText,  // 문자열 배열 전달
                     8000,      // maxContext (충분히 큰 값)
                     true,      // isDryRun (실제 스캔하지만 카운터 업데이트 안 함)
-                    null       // globalScanData
+                    undefined  // globalScanData → undefined면 기본값 적용됨
                 );
 
                 console.log(`[${EXTENSION_NAME}] Main API: 로어북 결과:`, {
