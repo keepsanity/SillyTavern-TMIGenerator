@@ -997,7 +997,21 @@ async function generateTMI(messageId) {
     } catch (error) {
         console.error(`[${EXTENSION_NAME}] 오류:`, error);
         messageElement.find('.tmi-container').remove();
-        messageElement.append(createErrorHTML(error.message || '알 수 없는 오류', messageId));
+
+        // 상세 에러 메시지 구성
+        let detailedError = error.message || '알 수 없는 오류';
+
+        // API 소스 정보 추가
+        const source = extensionSettings.source === 'main' ? 'Main API' : 'Connection Profile';
+        detailedError = `[${source}] ${detailedError}`;
+
+        // 스택 트레이스가 있으면 추가 (개발용)
+        if (error.stack) {
+            const stackPreview = error.stack.split('\n').slice(0, 5).join('\n');
+            detailedError += `\n\n--- Stack ---\n${stackPreview}`;
+        }
+
+        messageElement.append(createErrorHTML(detailedError, messageId));
         toastr.error(`TMI 생성 실패: ${error.message}`);
     } finally {
         pendingRequests.delete(tmiKey);
@@ -1098,27 +1112,16 @@ function getCharacterInfo() {
             info += `\nSystem Prompt:\n${charData.system_prompt}\n`;
         }
 
-        // 캐릭터 북 (Lorebook/World Info)
+        // 캐릭터 북 (Lorebook/World Info) - 전체 포함
         if (charData.character_book?.entries) {
             const entries = Object.values(charData.character_book.entries);
             if (entries.length > 0) {
                 info += `\n\nCharacter Lore (${entries.length} entries):\n`;
-                // 상시 활성화된 항목들만 포함 (constant=true)
-                const constantEntries = entries.filter(e => e.constant);
-                if (constantEntries.length > 0) {
-                    constantEntries.forEach(entry => {
-                        if (entry.content) {
-                            info += `- ${entry.content}\n`;
-                        }
-                    });
-                } else {
-                    // 상시 활성화가 없으면 상위 몇 개만
-                    entries.slice(0, 3).forEach(entry => {
-                        if (entry.content) {
-                            info += `- ${entry.content}\n`;
-                        }
-                    });
-                }
+                entries.forEach(entry => {
+                    if (entry.content) {
+                        info += `- ${entry.content}\n`;
+                    }
+                });
             }
         }
 
@@ -1456,9 +1459,11 @@ function createLoadingHTML() {
 
 function createErrorHTML(errorMessage, messageId) {
     const container = $('<div class="tmi-container"></div>');
-    const errorDiv = $('<div class="tmi-error"></div>');
+    const errorDiv = $('<div class="tmi-error" style="flex-direction: column; align-items: flex-start;"></div>');
 
-    errorDiv.append($('<span></span>').text('❌ 오류: ' + errorMessage));
+    // 에러 헤더
+    const errorHeader = $('<div style="display: flex; align-items: center; gap: 10px; width: 100%;"></div>');
+    errorHeader.append($('<span style="font-weight: bold;">❌ TMI 생성 실패</span>'));
 
     const retryButton = $('<button class="tmi-error-retry" title="재생성">🔄 재시도</button>');
     retryButton.on('click', async function() {
@@ -1474,10 +1479,33 @@ function createErrorHTML(errorMessage, messageId) {
 
         await generateTMI(messageId);
     });
+    errorHeader.append(retryButton);
+    errorDiv.append(errorHeader);
 
-    errorDiv.append(retryButton);
+    // 에러 상세 메시지 (접을 수 있음)
+    const errorDetails = $(`
+        <details style="margin-top: 8px; width: 100%;">
+            <summary style="cursor: pointer; color: var(--SmartThemeQuoteColor); font-size: 0.9em;">
+                📋 상세 정보 보기
+            </summary>
+            <pre style="
+                margin-top: 6px;
+                padding: 8px;
+                background: rgba(0, 0, 0, 0.3);
+                color: var(--SmartThemeBodyColor);
+                border: 1px solid var(--SmartThemeBorderColor);
+                border-radius: 4px;
+                font-size: 0.85em;
+                white-space: pre-wrap;
+                word-break: break-all;
+                max-height: 150px;
+                overflow-y: auto;
+            ">${escapeHtml(errorMessage)}</pre>
+        </details>
+    `);
+    errorDiv.append(errorDetails);
+
     container.append(errorDiv);
-
     return container;
 }
 
