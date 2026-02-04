@@ -124,9 +124,17 @@
 /* TMI 생성 버튼 (메시지 버튼 라인에 표시) */
 .mes_tmi_generate {
     /* SillyTavern의 기본 .mes_button 스타일 사용 */
+    flex-shrink: 0 !important; /* 버튼이 축소되지 않도록 */
+    order: 999; /* 항상 맨 뒤에 배치 */
 }
 
 .mes_tmi_generate.disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* extraMesButtons 컨테이너가 여러 줄로 표시되도록 */
+/* .mes .extraMesButtons {
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+} */

@@ -287,8 +287,14 @@ async function loadSettingsUI() {
 
             if (extensionSettings.enabled) {
                 toastr.success('TMI Generator가 활성화되었습니다. 🎉');
+                // 활성화 시: 자동 생성이 꺼져 있으면 버튼 표시
+                if (!extensionSettings.autoGenerate) {
+                    restoreAllTMI();
+                }
             } else {
                 toastr.info('TMI Generator가 비활성화되었습니다.');
+                // 비활성화 시: 모든 생성 버튼 숨기기
+                $('.mes_tmi_generate').hide();
             }
         });
 
@@ -651,6 +657,10 @@ function initializeEventListeners() {
     tmiButton.className = 'mes_button mes_tmi_generate fa-solid fa-comment-dots interactable';
     tmiButton.tabIndex = 0;
     tmiButton.setAttribute('role', 'button');
+    // Extension이 비활성화되어 있으면 숨김
+    if (!extensionSettings.enabled) {
+        tmiButton.style.display = 'none';
+    }
     document.querySelector('#message_template .mes_buttons .extraMesButtons')?.prepend(tmiButton);
 
     // 글로벌 클릭 리스너로 TMI 버튼 처리
@@ -669,12 +679,17 @@ function initializeEventListeners() {
         target.classList.add('fa-spin');
         target.style.pointerEvents = 'none';
 
-        await generateTMI(messageId);
-
-        // 생성 실패 시 버튼 복원
-        if (!$(`[mesid="${messageId}"] .tmi-container`).length) {
+        try {
+            await generateTMI(messageId);
+        } finally {
+            // 항상 스핀 제거 및 버튼 복원
             target.classList.remove('fa-spin');
             target.style.pointerEvents = 'auto';
+
+            // 생성 성공 시 버튼 숨기기
+            if ($(`[mesid="${messageId}"] .tmi-container`).length) {
+                hideGenerateButton(messageId);
+            }
         }
     });
 
@@ -1480,6 +1495,12 @@ function attachTMIEventHandlers(messageId) {
 function restoreAllTMI() {
     console.log(`[${EXTENSION_NAME}] TMI 복원 시작, 총 메시지: ${globalContext.chat.length}`);
 
+    // Extension이 비활성화되어 있으면 모든 버튼 숨기기
+    if (!extensionSettings.enabled) {
+        $('.mes_tmi_generate').hide();
+        return;
+    }
+
     let restoredCount = 0;
     let buttonCount = 0;
     globalContext.chat.forEach((message, messageId) => {
@@ -1547,6 +1568,11 @@ function clearAllTMI() {
 }
 
 function showGenerateButton(messageId) {
+    // Extension이 비활성화되어 있으면 버튼 표시 안 함
+    if (!extensionSettings.enabled) {
+        return;
+    }
+
     const button = $(`[mesid="${messageId}"] .mes_tmi_generate`);
     if (button.length > 0) {
         button.show();
