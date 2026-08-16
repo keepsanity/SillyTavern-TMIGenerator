@@ -99,6 +99,19 @@
             </div>
             <input id="tmi_context_messages" type="number" class="text_pole context_messages" min="5" max="1000" step="5" value="20" />
 
+            <!-- 중복 회피 -->
+            <label class="checkbox_label" for="tmi_dedupe_enabled" style="margin-top: 10px;">
+                <input type="checkbox" id="tmi_dedupe_enabled" class="dedupe_enabled" checked />
+                <span><strong>이미 나온 TMI 반복 방지</strong></span>
+            </label>
+            <small class="notes">앞서 생성된 TMI와 핀한 항목을 "이건 빼고"로 함께 넘깁니다</small>
+
+            <div id="tmi_dedupe_row" style="margin-top: 8px;">
+                <label for="tmi_dedupe_messages">참고할 메시지 범위</label>
+                <small class="notes">최근 몇 개 메시지의 TMI까지 되짚을지 (기본 30개)</small>
+                <input id="tmi_dedupe_messages" type="number" class="text_pole dedupe_messages" min="0" max="500" step="5" value="30" />
+            </div>
+
             <hr class="m-t-1 m-b-1">
 
             <!-- TMI 생성 프롬프트 -->
@@ -118,6 +131,53 @@
             </div>
 
             <textarea id="tmi_prompt" class="text_pole textarea_compact prompt" rows="6"></textarea>
+
+            <hr class="m-t-1 m-b-1">
+
+            <!-- 핀 주입 -->
+            <label class="checkbox_label" for="tmi_inject_enabled">
+                <input type="checkbox" id="tmi_inject_enabled" class="inject_enabled" checked />
+                <span><strong>핀한 TMI를 프롬프트에 주입</strong></span>
+            </label>
+            <small class="notes">📌 로 고정한 TMI를 작가노트처럼 매 요청에 넣습니다. 확장 메뉴 &gt; TMI 관리에서 관리할 수 있습니다.</small>
+
+            <div id="tmi_inject_settings">
+                <div style="margin-top: 10px;">
+                    <label for="tmi_inject_position">주입 위치</label>
+                    <small class="notes">작가노트와 같은 방식으로 들어갑니다</small>
+                </div>
+                <select id="tmi_inject_position" class="text_pole inject_position">
+                    <option value="1" selected>채팅 내 @Depth (권장)</option>
+                    <option value="2">메인 프롬프트 바로 앞</option>
+                    <option value="0">메인 프롬프트 바로 뒤</option>
+                </select>
+
+                <div id="tmi_inject_depth_row" style="margin-top: 8px;">
+                    <label for="tmi_inject_depth">Depth</label>
+                    <small class="notes">아래에서 몇 번째 메시지 위에 넣을지 (기본 4)</small>
+                    <input id="tmi_inject_depth" type="number" class="text_pole inject_depth" min="0" max="999" step="1" value="4" />
+
+                    <label for="tmi_inject_role" style="margin-top: 8px; display: block;">Role</label>
+                    <select id="tmi_inject_role" class="text_pole inject_role">
+                        <option value="0" selected>System</option>
+                        <option value="1">User</option>
+                        <option value="2">Assistant</option>
+                    </select>
+                </div>
+
+                <label class="checkbox_label" for="tmi_inject_scan" style="margin-top: 8px;">
+                    <input type="checkbox" id="tmi_inject_scan" class="inject_scan" />
+                    <span>주입된 내용으로 로어북 스캔</span>
+                </label>
+                <small class="notes">핀한 TMI의 단어가 월드인포 키워드를 발동시킵니다</small>
+
+                <div class="title_restorable" style="margin-top: 10px;">
+                    <label for="tmi_inject_template">주입 래퍼 템플릿</label>
+                    <button class="menu_button fa-solid fa-undo interactable restore_inject_template" title="기본 템플릿으로 복원"></button>
+                </div>
+                <small class="notes">{{tmi}} 자리에 핀 목록이 들어갑니다</small>
+                <textarea id="tmi_inject_template" class="text_pole textarea_compact inject_template" rows="4"></textarea>
+            </div>
 
             <hr class="m-t-1 m-b-1">
 
@@ -143,14 +203,14 @@
             <!-- TMI 데이터 관리 -->
             <div>
                 <label>TMI 데이터 관리</label>
-                <small class="notes">저장된 TMI 데이터를 정리할 수 있습니다</small>
+                <small class="notes">TMI는 메시지에 함께 저장되어, 채팅을 내보내거나 브랜치해도 따라갑니다</small>
             </div>
             <div style="display: flex; gap: 6px; margin-top: 6px; margin-bottom: 10px;">
                 <button class="menu_button interactable tmi_clear_current" style="flex: 1;">
                     현재 채팅방 TMI 초기화
                 </button>
-                <button class="menu_button interactable tmi_clear_all" style="flex: 1;">
-                    전체 TMI 초기화
+                <button class="menu_button interactable tmi_clear_legacy" style="flex: 1;">
+                    레거시 저장소 정리
                 </button>
             </div>
         </div>
