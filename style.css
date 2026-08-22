@@ -325,3 +325,101 @@
     flex-wrap: wrap !important;
     gap: 4px !important;
 } */
+
+/* ── TMI 탭 ───────────────────────────────────────────────── */
+/* 사용자 Custom CSS 프리셋에는 없는 요소라 여기서 기본 모양을 줍니다 */
+.tmi-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.tmi-tab {
+    flex-shrink: 0;
+    max-width: 12em;
+    padding: 4px 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--genericRadius, 8px);
+    background: transparent;
+    color: var(--SmartThemeBodyColor);
+    font-size: 0.8em;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    opacity: 0.65;
+    transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.tmi-tab:hover {
+    opacity: 1;
+}
+
+.tmi-tab.active {
+    opacity: 1;
+    font-weight: bold;
+    color: var(--SmartThemeQuoteColor);
+    border-color: var(--SmartThemeQuoteColor);
+    background: var(--black20a);
+}
+
+.tmi-tab-add {
+    padding: 4px 9px;
+    font-weight: bold;
+}
+
+.tmi-tab-add.busy {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+/* ── 프리셋 선택 팝업 (탭 + 버튼) ─────────────────────────── */
+.tmi-preset-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+}
+
+.tmi-preset-group {
+    margin-top: 10px;
+    padding: 4px 6px;
+    font-size: 0.85em;
+    opacity: 0.6;
+}
+
+.tmi-preset-group:first-child {
+    margin-top: 0;
+}
+
+.tmi-preset-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--genericRadius, 10px);
+    cursor: pointer;
+}
+
+.tmi-preset-row:hover {
+    background: var(--white30a);
+}
+
+.tmi-preset-row.current {
+    color: var(--SmartThemeQuoteColor);
+    font-weight: bold;
+}
+
+.tmi-preset-check {
+    width: 1em;
+    flex-shrink: 0;
+}
+
+.tmi-preset-name {
+    flex: 1;
+}

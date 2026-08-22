@@ -372,18 +372,44 @@ function readTMI(messageId) {
     return null;
 }
 
-function makeTMI(items, { preset = '', visible = false, ts = null } = {}) {
+function makeTMI(items, { preset = '', presetKey = '', visible = false, ts = null } = {}) {
     return {
         v: TMI_VERSION,
         visible: !!visible,
-        sets: [{
-            preset,
-            items,
-            ts: ts ?? Date.now(),
-            pinned: [],  // 핀 기능(다음 단계)에서 사용
-            edits: {},
-        }],
+        activeSet: 0,
+        sets: [makeSet(items, { preset, presetKey, ts })],
     };
+}
+
+/** 탭 하나(프리셋 한 번의 생성 결과) */
+function makeSet(items, { preset = '', presetKey = '', ts = null } = {}) {
+    return {
+        preset,
+        presetKey,
+        items,
+        ts: ts ?? Date.now(),
+        pinned: [],
+        edits: {},
+    };
+}
+
+/** 활성 탭 번호 (저장값이 범위를 벗어나면 0으로) */
+function getActiveSetIndex(tmi) {
+    const index = Number(tmi?.activeSet ?? 0);
+    if (!Number.isInteger(index) || index < 0 || index >= (tmi?.sets?.length ?? 0)) return 0;
+    return index;
+}
+
+/** 탭이 어떤 프리셋으로 만들어졌는지 되짚습니다. 못 찾으면 '' (현재 설정 프롬프트 사용) */
+function resolveSetPresetKey(set) {
+    if (set?.presetKey && getPresetPrompt(set.presetKey) !== undefined) return set.presetKey;
+
+    // 이름만 저장된 예전 세트를 위해 이름으로 되짚기
+    const name = set?.preset;
+    if (!name) return '';
+    if (BUILTIN_PROMPT_PRESETS[name] !== undefined) return makePresetKey('builtin', name);
+    if (extensionSettings.promptPresets?.[name] !== undefined) return makePresetKey('user', name);
+    return '';
 }
 
 /** 여러 줄 항목을 한 줄로 (프롬프트의 불릿 목록에 넣을 때) */
@@ -500,13 +526,18 @@ function collectAvoidItems(messageId, extra = []) {
     extra.forEach(push);
 
     // 2. 핀된 항목 — 이미 프롬프트에 들어가 있으므로 다시 뽑으면 낭비
-    collectPinnedItems().forEach(item => push(item.text));
+    //    단, 같은 메시지의 탭들은 제외합니다 (같은 장면을 다른 렌즈로 보는 것이라
+    //    같은 소재를 다르게 다루는 편이 자연스럽기 때문)
+    collectPinnedItems()
+        .filter(item => item.messageId !== messageId)
+        .forEach(item => push(item.text));
 
     // 3. 최근 메시지의 TMI (최신부터 거슬러 올라가며 상한까지)
+    //    현재 메시지(i === messageId)는 건너뜁니다 — 위와 같은 이유
     const span = Math.max(0, Number(extensionSettings.dedupeMessages ?? 30));
     const oldest = Math.max(0, messageId - span);
 
-    for (let i = messageId; i >= oldest; i--) {
+    for (let i = messageId - 1; i >= oldest; i--) {
         const tmi = readTMI(i);
         if (!tmi) continue;
 
@@ -1575,7 +1606,7 @@ async function waitForChatRender(expectedChatId, timeoutMs = 5000) {
     return false;
 }
 
-function buildFullPrompt(avoidItems = []) {
+function buildFullPrompt(avoidItems = [], promptText = null) {
     // 언어 설정
     // 프리셋·포맷 규칙·대화 컨텍스트가 모두 영어라, 짧은 한 줄로는 밀립니다.
     // 그래서 프롬프트 맨 끝에 두고, 작중 텍스트까지 포함된다는 걸 명시합니다.
@@ -1606,7 +1637,8 @@ function buildFullPrompt(avoidItems = []) {
     // 전체 프롬프트 조합
     // 순서가 중요합니다: 내용 지시 → 제외 목록 → 형식 → 언어(마지막).
     // 언어 지시가 가운데 있으면 뒤따르는 영어 규칙과 영어 대화에 밀려 섞여 나옵니다.
-    const fullPrompt = `${globalContext.substituteParams(extensionSettings.prompt)}${avoidBlock}
+    const basePrompt = promptText ?? extensionSettings.prompt;
+    const fullPrompt = `${globalContext.substituteParams(basePrompt)}${avoidBlock}
 
 CRITICAL FORMAT - You MUST use this EXACT structure:
 <tmi>
@@ -1631,7 +1663,11 @@ ${languageInstruction}`;
 
 /**
  * @param {number} messageId
- * @param {{avoid?: string[]}} [options] avoid: 이번 생성에서 피해야 할 문장 (재생성 직전에 지운 항목 등)
+ * @param {object} [options]
+ * @param {string[]} [options.avoid] 이번 생성에서 피해야 할 문장 (재생성 직전에 지운 항목 등)
+ * @param {string} [options.presetKey] 이 생성에만 쓸 프리셋 (전역 설정은 바꾸지 않음)
+ * @param {boolean} [options.appendSet] 기존 TMI를 두고 새 탭으로 추가
+ * @param {number} [options.replaceSetIndex] 해당 번호의 탭만 교체 (탭 재생성)
  */
 async function generateTMI(messageId, options = {}) {
     if (!extensionSettings.enabled) {
@@ -1673,7 +1709,9 @@ async function generateTMI(messageId, options = {}) {
             console.log(`[${EXTENSION_NAME}] 중복 회피: 기존 TMI ${avoidItems.length}개를 제외 목록으로 전달`);
         }
 
-        const fullPrompt = buildFullPrompt(avoidItems);
+        // presetKey가 주어지면 그 프리셋 프롬프트로 생성합니다 (전역 활성 프리셋은 그대로)
+        const overridePrompt = options.presetKey ? getPresetPrompt(options.presetKey) : null;
+        const fullPrompt = buildFullPrompt(avoidItems, overridePrompt ?? null);
         let result = '';
 
         if (extensionSettings.source === 'main') {
@@ -1791,11 +1829,34 @@ async function generateTMI(messageId, options = {}) {
         }
 
         if (tmiItems && tmiItems.length > 0) {
-            // 메시지 자체에 저장 (스와이프별 분리는 ST가 처리)
-            const tmi = makeTMI(tmiItems, {
-                preset: getCurrentPresetLabel(),
-                visible: extensionSettings.autoOpen,
-            });
+            const presetKey = options.presetKey || extensionSettings.selectedPromptPreset || '';
+            const presetName = options.presetKey
+                ? parsePresetKey(options.presetKey).name
+                : getCurrentPresetLabel();
+
+            const existing = readTMI(currentId);
+            let tmi;
+
+            if (existing && typeof options.replaceSetIndex === 'number' && existing.sets[options.replaceSetIndex]) {
+                // 탭 재생성 — 해당 탭만 갈아끼우고 핀/편집은 새 내용 기준으로 초기화
+                tmi = existing;
+                tmi.sets[options.replaceSetIndex] = makeSet(tmiItems, { preset: presetName, presetKey });
+                tmi.activeSet = options.replaceSetIndex;
+            } else if (existing && options.appendSet) {
+                // 새 탭 추가
+                tmi = existing;
+                tmi.sets.push(makeSet(tmiItems, { preset: presetName, presetKey }));
+                tmi.activeSet = tmi.sets.length - 1;
+                tmi.visible = true; // 방금 만든 탭은 바로 보여줍니다
+            } else {
+                // 메시지 자체에 저장 (스와이프별 분리는 ST가 처리)
+                tmi = makeTMI(tmiItems, {
+                    preset: presetName,
+                    presetKey,
+                    visible: extensionSettings.autoOpen,
+                });
+            }
+
             writeTMI(currentId, tmi);
             renderTMI(currentId, tmi);
         } else {
@@ -2289,10 +2350,28 @@ function createTMIHTML(messageId, tmi) {
     const content = $('<div class="tmi-content"></div>');
     if (!visible) content.addClass('collapsed');
 
+    const activeIndex = getActiveSetIndex(tmi);
+
+    // 탭바 — 프리셋별 결과를 탭으로 나눠 봅니다
+    const tabBar = $('<div class="tmi-tabs"></div>');
     tmi.sets.forEach((set, setIndex) => {
-        (set.items ?? []).forEach((_, itemIndex) => {
-            content.append(createItemElement(messageId, set, setIndex, itemIndex));
-        });
+        $('<div class="tmi-tab"></div>')
+            .attr('data-tmi-tab', setIndex)
+            .attr('title', set.preset || 'TMI')
+            .toggleClass('active', setIndex === activeIndex)
+            .text(set.preset || 'TMI')
+            .appendTo(tabBar);
+    });
+    $('<div class="tmi-tab tmi-tab-add"></div>')
+        .attr('title', '다른 프리셋으로 탭 추가')
+        .text('+')
+        .appendTo(tabBar);
+    content.append(tabBar);
+
+    // 활성 탭의 항목만 표시
+    const activeSet = tmi.sets[activeIndex];
+    (activeSet?.items ?? []).forEach((_, itemIndex) => {
+        content.append(createItemElement(messageId, activeSet, activeIndex, itemIndex));
     });
 
     container.append(content);
@@ -2433,6 +2512,36 @@ function attachTMIEventHandlers(messageId) {
         }
     });
 
+    // 탭 전환
+    container.find('.tmi-tab[data-tmi-tab]').off('click').on('click', function(e) {
+        e.stopPropagation();
+
+        const index = Number($(this).attr('data-tmi-tab'));
+        const tmi = readTMI(messageId);
+        if (!tmi || isNaN(index) || !tmi.sets[index]) return;
+        if (getActiveSetIndex(tmi) === index) return;
+
+        tmi.activeSet = index;
+        writeTMI(messageId, tmi);
+        renderTMI(messageId, tmi);
+    });
+
+    // 새 탭 추가 — 고른 프리셋으로 이 메시지에만 추가 생성 (전역 프리셋은 그대로)
+    container.find('.tmi-tab-add').off('click').on('click', async function(e) {
+        e.stopPropagation();
+        const button = $(this);
+
+        const key = await openPresetPicker();
+        if (!key) return;
+
+        button.addClass('busy').text('…');
+        try {
+            await generateTMI(messageId, { presetKey: key, appendSet: true });
+        } finally {
+            button.removeClass('busy').text('+');
+        }
+    });
+
     container.find('.tmi-pin').off('click').on('click', function(e) {
         e.stopPropagation();
 
@@ -2445,39 +2554,72 @@ function attachTMIEventHandlers(messageId) {
         toastr.success(pinned ? '핀 - 이 항목이 프롬프트에 주입됩니다' : '핀 해제됨');
     });
 
+    // 재생성 — 활성 탭만, 그 탭을 만든 프리셋으로
     container.find('.tmi-regenerate').off('click').on('click', async function(e) {
         e.stopPropagation();
         const button = $(this);
-        button.prop('disabled', true);
+
+        const tmi = readTMI(messageId);
+        if (!tmi) return;
+
+        const activeIndex = getActiveSetIndex(tmi);
+        const activeSet = tmi.sets[activeIndex];
 
         // 지우기 전에 기존 항목을 챙겨서 "이건 빼고 다시" 라고 알려줌
-        const previousItems = collectItemTexts(readTMI(messageId));
+        const previousItems = (activeSet?.items ?? [])
+            .map((_, itemIndex) => getItemText(activeSet, itemIndex));
 
-        deleteTMI(messageId);
-        await generateTMI(messageId, { avoid: previousItems });
-        button.prop('disabled', false);
+        button.prop('disabled', true);
+        try {
+            await generateTMI(messageId, {
+                avoid: previousItems,
+                presetKey: resolveSetPresetKey(activeSet),
+                replaceSetIndex: activeIndex,
+            });
+        } finally {
+            button.prop('disabled', false);
+        }
     });
 
+    // 삭제 — 활성 탭만, 마지막 하나 남았으면 TMI 통째로
     container.find('.tmi-delete').off('click').on('click', async function(e) {
         e.stopPropagation();
 
+        const tmi = readTMI(messageId);
+        if (!tmi) return;
+
+        const activeIndex = getActiveSetIndex(tmi);
+        const isLastTab = tmi.sets.length <= 1;
+        const tabName = tmi.sets[activeIndex]?.preset || 'TMI';
+
         const confirmed = await globalContext.Popup.show.confirm(
-            '이 TMI를 삭제하시겠습니까?',
-            'TMI 삭제'
+            isLastTab
+                ? '이 TMI를 삭제하시겠습니까?'
+                : `"${tabName}" 탭을 삭제하시겠습니까?`,
+            isLastTab ? 'TMI 삭제' : '탭 삭제'
         );
         if (!confirmed) return;
 
-        deleteTMI(messageId);
+        if (isLastTab) {
+            deleteTMI(messageId);
+            container.remove();
 
-        // DOM에서 제거
-        container.remove();
+            // 자동 생성이 꺼져 있으면 생성 버튼 표시
+            if (!extensionSettings.autoGenerate) {
+                showGenerateButton(messageId);
+            }
 
-        // 자동 생성이 꺼져 있으면 생성 버튼 표시
-        if (!extensionSettings.autoGenerate) {
-            showGenerateButton(messageId);
+            toastr.success('TMI가 삭제되었습니다');
+            return;
         }
 
-        toastr.success('TMI가 삭제되었습니다');
+        tmi.sets.splice(activeIndex, 1);
+        tmi.activeSet = Math.max(0, activeIndex - 1);
+        writeTMI(messageId, tmi);
+        updateInjection(); // 지워진 탭에 핀이 있었을 수 있음
+        renderTMI(messageId, tmi);
+
+        toastr.success(`"${tabName}" 탭이 삭제되었습니다`);
     });
 }
 
@@ -2514,6 +2656,50 @@ async function addManagerMenuButton(retries = 40) {
 
     button.on('click', () => openManagerPanel());
     menu.append(button);
+}
+
+/**
+ * 프리셋 목록을 띄우고 고른 키를 돌려줍니다. 취소하면 null.
+ * @returns {Promise<string|null>}
+ */
+async function openPresetPicker(currentKey = '') {
+    const root = $('<div class="tmi-preset-picker"></div>');
+    let chosen = null;
+
+    const addGroup = (label) => {
+        root.append($('<div class="tmi-preset-group"></div>').text(label));
+    };
+
+    const addRow = (key, name) => {
+        const row = $('<div class="tmi-preset-row"></div>').toggleClass('current', key === currentKey);
+        row.append($('<span class="tmi-preset-check"></span>').text(key === currentKey ? '✓' : ''));
+        row.append($('<span class="tmi-preset-name"></span>').text(name));
+        row.on('click', () => {
+            chosen = key;
+            popup.complete(globalContext.POPUP_RESULT.AFFIRMATIVE);
+        });
+        root.append(row);
+    };
+
+    addGroup('기본 제공');
+    Object.keys(BUILTIN_PROMPT_PRESETS).forEach(name => addRow(makePresetKey('builtin', name), name));
+
+    const userNames = Object.keys(extensionSettings.promptPresets ?? {});
+    if (userNames.length > 0) {
+        addGroup('내 프리셋');
+        userNames.forEach(name => addRow(makePresetKey('user', name), name));
+    }
+
+    const popup = new globalContext.Popup(root[0], globalContext.POPUP_TYPE.TEXT, '', {
+        wider: true,
+        allowVerticalScrolling: true,
+        okButton: false,
+        cancelButton: '취소',
+    });
+    popup.dlg?.classList.add('tmi-manager-popup');
+
+    await popup.show();
+    return chosen;
 }
 
 async function openManagerPanel() {
