@@ -2291,7 +2291,7 @@ function createTMIHTML(messageId, tmi) {
 
     tmi.sets.forEach((set, setIndex) => {
         (set.items ?? []).forEach((_, itemIndex) => {
-            content.append(createItemElement(set, setIndex, itemIndex));
+            content.append(createItemElement(messageId, set, setIndex, itemIndex));
         });
     });
 
@@ -2304,8 +2304,8 @@ function createTMIHTML(messageId, tmi) {
  * TMI 항목 하나를 그립니다. 사용자 HTML 템플릿의 결과물에 핀 버튼만 얹으므로
  * 기존 Custom CSS(.tmi-item 등)는 그대로 적용됩니다.
  */
-function createItemElement(set, setIndex, itemIndex) {
-    const html = renderHTMLTemplate(extensionSettings.htmlTemplate, getItemText(set, itemIndex));
+function createItemElement(messageId, set, setIndex, itemIndex) {
+    const html = renderHTMLTemplate(extensionSettings.htmlTemplate, getItemText(set, itemIndex), messageId);
 
     // $(html)은 '<'로 시작하지 않는 문자열을 셀렉터로 해석해 예외를 던지므로 parseHTML을 씁니다
     let element = $($.parseHTML(html) ?? []);
@@ -2324,13 +2324,36 @@ function createItemElement(set, setIndex, itemIndex) {
     return element;
 }
 
-function renderHTMLTemplate(template, text) {
+function renderHTMLTemplate(template, text, messageId) {
     if (!template) template = DEFAULT_HTML_TEMPLATE;
 
-    // 여러 줄짜리 항목(SNS 포스트, 뉴스 기사 등)의 줄바꿈을 살립니다
-    const html = escapeHtml(String(text)).replace(/\r?\n/g, '<br>');
+    // ST의 실제 메시지와 같은 렌더러를 써서 마크다운(굵게/기울임/코드 등)이
+    // 그대로 보이게 합니다 (showdown 변환 + 정규식 스크립트 + DOMPurify까지 동일 경로).
+    // messageId는 이 TMI가 붙은 실제 메시지 번호라, 그 메시지 기준으로 정규식
+    // 스크립트의 depth가 계산됩니다 — 캐릭터 답장에 적용되는 규칙과 동일하게 맞습니다.
+    const html = renderMarkdown(text, messageId);
 
     return template.replace(/\{\{this\}\}/g, html);
+}
+
+/**
+ * TMI 항목 텍스트를 ST 표준 마크다운 렌더러로 변환합니다.
+ * messageFormatting을 쓸 수 없는 예전 ST 버전이거나 렌더링 중 오류가 나면
+ * 기존의 단순 이스케이프+줄바꿈 방식으로 안전하게 되돌아갑니다.
+ */
+function renderMarkdown(text, messageId) {
+    const raw = String(text ?? '');
+
+    if (typeof globalContext.messageFormatting === 'function') {
+        try {
+            const chName = globalContext.chat?.[messageId]?.name || '';
+            return globalContext.messageFormatting(raw, chName, false, false, messageId);
+        } catch (error) {
+            console.warn(`[${EXTENSION_NAME}] messageFormatting 실패, 기본 렌더링으로 대체:`, error);
+        }
+    }
+
+    return escapeHtml(raw).replace(/\r?\n/g, '<br>');
 }
 
 function escapeHtml(text) {
