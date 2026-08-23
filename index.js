@@ -587,12 +587,17 @@ function updateInjection() {
 
 /**
  * 항목의 핀 상태를 토글하고 주입을 갱신합니다.
- * @returns {boolean} 토글 후 핀 상태
+ * 실패(대상 탭/항목을 못 찾음)와 "핀 해제됨"을 구분해야 하므로,
+ * 실패는 false가 아니라 null로 돌려줍니다.
+ * @returns {boolean|null} 토글 후 핀 상태, 실패 시 null
  */
 function togglePin(messageId, setIndex, itemIndex) {
     const tmi = readTMI(messageId);
     const set = tmi?.sets?.[setIndex];
-    if (!set) return false;
+    if (!set) {
+        console.warn(`[${EXTENSION_NAME}] 핀 대상을 찾지 못했습니다.`, { messageId, setIndex, itemIndex });
+        return null;
+    }
 
     if (!Array.isArray(set.pinned)) set.pinned = [];
 
@@ -2491,12 +2496,25 @@ function createErrorHTML(errorMessage, messageId) {
     return container;
 }
 
+/**
+ * 클릭 시점의 실제 메시지 번호를 DOM에서 다시 읽습니다.
+ *
+ * 메시지를 지우면 ST가 남은 메시지들의 mesid를 다시 매기지만
+ * (script.js의 updateViewMessageIds), 핸들러가 붙을 때 잡아둔 번호는 그대로입니다.
+ * 클로저 값을 그대로 믿으면 지운 메시지 아래쪽 TMI가 전부 엉뚱한 메시지를 건드립니다.
+ */
+function resolveMessageIdFromDom(element, fallback) {
+    const mesid = Number($(element).closest('.mes').attr('mesid'));
+    return Number.isInteger(mesid) && mesid >= 0 ? mesid : fallback;
+}
+
 function attachTMIEventHandlers(messageId) {
     const container = $(`[mesid="${messageId}"] .tmi-container`);
 
     container.find('.tmi-header').off('click').on('click', function(e) {
         if ($(e.target).closest('.tmi-regenerate, .tmi-delete').length > 0) return;
 
+        const id = resolveMessageIdFromDom(this, messageId);
         const content = container.find('.tmi-content');
         const toggleIcon = container.find('.tmi-toggle-icon');
         const isCollapsed = content.hasClass('collapsed');
@@ -2505,10 +2523,10 @@ function attachTMIEventHandlers(messageId) {
         toggleIcon.toggleClass('expanded');
 
         // 펼침 상태를 메시지에 저장
-        const tmi = readTMI(messageId);
+        const tmi = readTMI(id);
         if (tmi) {
             tmi.visible = isCollapsed;
-            writeTMI(messageId, tmi);
+            writeTMI(id, tmi);
         }
     });
 
@@ -2516,27 +2534,29 @@ function attachTMIEventHandlers(messageId) {
     container.find('.tmi-tab[data-tmi-tab]').off('click').on('click', function(e) {
         e.stopPropagation();
 
+        const id = resolveMessageIdFromDom(this, messageId);
         const index = Number($(this).attr('data-tmi-tab'));
-        const tmi = readTMI(messageId);
+        const tmi = readTMI(id);
         if (!tmi || isNaN(index) || !tmi.sets[index]) return;
         if (getActiveSetIndex(tmi) === index) return;
 
         tmi.activeSet = index;
-        writeTMI(messageId, tmi);
-        renderTMI(messageId, tmi);
+        writeTMI(id, tmi);
+        renderTMI(id, tmi);
     });
 
     // 새 탭 추가 — 고른 프리셋으로 이 메시지에만 추가 생성 (전역 프리셋은 그대로)
     container.find('.tmi-tab-add').off('click').on('click', async function(e) {
         e.stopPropagation();
         const button = $(this);
+        const id = resolveMessageIdFromDom(this, messageId);
 
         const key = await openPresetPicker();
         if (!key) return;
 
         button.addClass('busy').text('…');
         try {
-            await generateTMI(messageId, { presetKey: key, appendSet: true });
+            await generateTMI(id, { presetKey: key, appendSet: true });
         } finally {
             button.removeClass('busy').text('+');
         }
@@ -2545,12 +2565,20 @@ function attachTMIEventHandlers(messageId) {
     container.find('.tmi-pin').off('click').on('click', function(e) {
         e.stopPropagation();
 
+        const id = resolveMessageIdFromDom(this, messageId);
         const item = $(this).closest('[data-tmi-set]');
         const setIndex = Number(item.attr('data-tmi-set'));
         const itemIndex = Number(item.attr('data-tmi-item'));
         if (isNaN(setIndex) || isNaN(itemIndex)) return;
 
-        const pinned = togglePin(messageId, setIndex, itemIndex);
+        const pinned = togglePin(id, setIndex, itemIndex);
+
+        // null = 저장 대상을 못 찾음 (해제와 구분해서 알려줍니다)
+        if (pinned === null) {
+            toastr.error('핀 상태를 저장하지 못했습니다. 채팅을 다시 열어보세요.');
+            return;
+        }
+
         toastr.success(pinned ? '핀 - 이 항목이 프롬프트에 주입됩니다' : '핀 해제됨');
     });
 
@@ -2558,8 +2586,9 @@ function attachTMIEventHandlers(messageId) {
     container.find('.tmi-regenerate').off('click').on('click', async function(e) {
         e.stopPropagation();
         const button = $(this);
+        const id = resolveMessageIdFromDom(this, messageId);
 
-        const tmi = readTMI(messageId);
+        const tmi = readTMI(id);
         if (!tmi) return;
 
         const activeIndex = getActiveSetIndex(tmi);
@@ -2571,7 +2600,7 @@ function attachTMIEventHandlers(messageId) {
 
         button.prop('disabled', true);
         try {
-            await generateTMI(messageId, {
+            await generateTMI(id, {
                 avoid: previousItems,
                 presetKey: resolveSetPresetKey(activeSet),
                 replaceSetIndex: activeIndex,
@@ -2585,7 +2614,8 @@ function attachTMIEventHandlers(messageId) {
     container.find('.tmi-delete').off('click').on('click', async function(e) {
         e.stopPropagation();
 
-        const tmi = readTMI(messageId);
+        const id = resolveMessageIdFromDom(this, messageId);
+        const tmi = readTMI(id);
         if (!tmi) return;
 
         const activeIndex = getActiveSetIndex(tmi);
@@ -2601,12 +2631,12 @@ function attachTMIEventHandlers(messageId) {
         if (!confirmed) return;
 
         if (isLastTab) {
-            deleteTMI(messageId);
+            deleteTMI(id);
             container.remove();
 
             // 자동 생성이 꺼져 있으면 생성 버튼 표시
             if (!extensionSettings.autoGenerate) {
-                showGenerateButton(messageId);
+                showGenerateButton(id);
             }
 
             toastr.success('TMI가 삭제되었습니다');
@@ -2615,9 +2645,9 @@ function attachTMIEventHandlers(messageId) {
 
         tmi.sets.splice(activeIndex, 1);
         tmi.activeSet = Math.max(0, activeIndex - 1);
-        writeTMI(messageId, tmi);
+        writeTMI(id, tmi);
         updateInjection(); // 지워진 탭에 핀이 있었을 수 있음
-        renderTMI(messageId, tmi);
+        renderTMI(id, tmi);
 
         toastr.success(`"${tabName}" 탭이 삭제되었습니다`);
     });
