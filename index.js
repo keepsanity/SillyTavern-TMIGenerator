@@ -312,7 +312,8 @@ const DEFAULT_SETTINGS = {
     source: 'main',
     profileId: '',
     autoGenerate: true,
-    maxTokens: 1500,
+    maxTokens: 4000, // 리즈닝 모델은 생각에만 수천 토큰을 쓰므로 넉넉해야 본문이 안 잘립니다
+    maxTokensBumped: false, // 옛 기본값 1500 → 4000 상향을 한 번만 적용하기 위한 표식
     tmiCount: 3, // TMI 개수 (1-10)
     tmiLength: 'medium', // TMI 길이 ('short', 'medium', 'long')
     language: 'en', // TMI 출력 언어 ('en', 'ko')
@@ -759,6 +760,17 @@ async function init() {
 
     // 예전에 심어둔 기본 프리셋 정리 (빌트인으로 대체)
     pruneSeededPresets();
+
+    // 옛 기본값(1500)을 그대로 두고 있으면 새 기본값으로 올립니다. 딱 한 번만 합니다.
+    // 매번 하면 1500을 일부러 고른 사용자의 설정을 계속 덮어쓰게 됩니다.
+    if (!extensionSettings.maxTokensBumped) {
+        if (extensionSettings.maxTokens === 1500) {
+            extensionSettings.maxTokens = DEFAULT_SETTINGS.maxTokens;
+            console.log(`[${EXTENSION_NAME}] 최대 응답 토큰 수를 ${DEFAULT_SETTINGS.maxTokens}로 올렸습니다.`);
+        }
+        extensionSettings.maxTokensBumped = true;
+        saveSettings();
+    }
 
     await loadSettingsUI();
     initializeEventListeners();
@@ -1805,14 +1817,21 @@ async function generateTMI(messageId, options = {}) {
                 full_response: response
             });
 
-            // 여러 형식 지원
+            // extractData: true면 { content, reasoning } 형태로 돌아옵니다
             if (typeof response === 'string') {
                 result = response;
             } else if (response?.choices?.[0]?.message) {
                 const msg = response.choices[0].message;
-                result = msg.reasoning_content || msg.content || '';
+                // content가 먼저입니다. reasoning_content는 모델의 생각이라 형식이 없습니다
+                result = msg.content || msg.reasoning_content || '';
             } else {
                 result = response?.content || response?.message || '';
+            }
+
+            // 답을 reasoning 쪽에만 넣어주는 모델/프록시가 있어 마지막으로 확인합니다
+            if (!result && typeof response?.reasoning === 'string' && /<tmi>/i.test(response.reasoning)) {
+                console.warn(`[${EXTENSION_NAME}] content가 비어 reasoning에서 TMI를 찾았습니다.`);
+                result = response.reasoning;
             }
 
             if (!result) {
@@ -1821,6 +1840,16 @@ async function generateTMI(messageId, options = {}) {
         }
 
         console.log(`[${EXTENSION_NAME}] 파싱 전 result:`, { length: result?.length || 0, preview: result?.substring(0, 200) });
+
+        // 빈 응답과 형식 불일치는 원인이 다르므로 메시지를 나눠 알려줍니다.
+        // 응답 길이를 어디서 정하는지가 소스마다 달라 안내도 나눕니다.
+        if (!result || !String(result).trim()) {
+            const lengthHint = extensionSettings.source === 'profile'
+                ? '이 확장의 "최대 응답 토큰 수"를 늘려보세요'
+                : 'Main API는 현재 프리셋의 응답 길이를 따릅니다. 프리셋 쪽 응답 길이를 늘려보세요';
+            throw new Error(`모델이 빈 응답을 보냈습니다. 리즈닝 모델이면 생각에 토큰을 다 써서 본문이 비어 옵니다 — ${lengthHint}. 검열 차단이나 프로필 설정 문제일 수도 있습니다.`);
+        }
+
         const tmiItems = parseTMIResponse(result);
 
         // 기다리는 사이에 대상이 바뀌었는지 확인
@@ -1865,7 +1894,9 @@ async function generateTMI(messageId, options = {}) {
             writeTMI(currentId, tmi);
             renderTMI(currentId, tmi);
         } else {
-            throw new Error('TMI 응답을 파싱할 수 없습니다.');
+            // 어떤 내용이 왔는지 에러 박스에서 바로 보이게 합니다
+            const preview = String(result).trim().replace(/\s+/g, ' ').slice(0, 150);
+            throw new Error(`모델이 <tmi> 형식을 지키지 않아 항목을 찾지 못했습니다. 받은 내용: ${preview}`);
         }
     } catch (error) {
         console.error(`[${EXTENSION_NAME}] 오류:`, error);
@@ -2228,10 +2259,16 @@ function parseTMIResponse(content) {
     console.log(`[${EXTENSION_NAME}] parseTMIResponse 입력:`, content.substring(0, 200));
 
     // 1. <tmi>...</tmi> 태그 안의 내용 추출 (메인 파싱 방법)
+    //    닫는 태그가 없으면 토큰 상한에 걸려 잘린 응답으로 보고 여는 태그 뒤를 전부 씁니다.
     const tmiRegex = /<tmi>\s*([\s\S]*?)\s*<\/tmi>/i;
-    const tmiMatch = content.match(tmiRegex);
+    const tmiOpenOnlyRegex = /<tmi>\s*([\s\S]*)$/i;
+    const tmiMatch = content.match(tmiRegex) ?? content.match(tmiOpenOnlyRegex);
 
     if (tmiMatch) {
+        if (!/<\/tmi>/i.test(content)) {
+            console.warn(`[${EXTENSION_NAME}] </tmi>가 없습니다 — 응답이 잘린 것으로 보고 여는 태그 뒤를 파싱합니다.`);
+        }
+
         const tmiContent = tmiMatch[1];
         console.log(`[${EXTENSION_NAME}] <tmi> 태그 내용 추출 성공, 길이: ${tmiContent.length}`);
 
