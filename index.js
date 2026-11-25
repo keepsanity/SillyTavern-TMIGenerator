@@ -2034,19 +2034,6 @@ function getCharacterInfo() {
             info += `\nSystem Prompt:\n${charData.system_prompt}\n`;
         }
 
-        // 캐릭터 북 (Lorebook/World Info) - 전체 포함
-        if (charData.character_book?.entries) {
-            const entries = Object.values(charData.character_book.entries);
-            if (entries.length > 0) {
-                info += `\n\nCharacter Lore (${entries.length} entries):\n`;
-                entries.forEach(entry => {
-                    if (entry.content) {
-                        info += `- ${entry.content}\n`;
-                    }
-                });
-            }
-        }
-
         console.log(`[${EXTENSION_NAME}] 캐릭터 정보 (${info.length}자):`, info.substring(0, 150));
         return info.trim();
     } catch (error) {
