@@ -2071,8 +2071,8 @@ async function buildContextMessages(upToMessageId) {
         try {
             console.log(`[${EXTENSION_NAME}] Connection Profile: 로어북 가져오기 시도...`);
 
-            // chat을 문자열 배열로 변환
-            const chatText = globalContext.chat.map(msg => msg?.mes || '').filter(text => text);
+            // 최신 메시지가 앞에 오는 문자열 배열 (ST 스캔 규약)
+            const chatText = globalContext.chat.slice(0, upToMessageId + 1).map(msg => msg?.mes || '').filter(text => text).reverse();
 
             // chatText가 비어있으면 건너뛰기
             if (chatText.length === 0) {
@@ -2187,8 +2187,8 @@ async function buildContextText(upToMessageId) {
         try {
             console.log(`[${EXTENSION_NAME}] Main API: 로어북 가져오기 시도...`);
 
-            // chat을 문자열 배열로 변환
-            const chatText = globalContext.chat.map(msg => msg?.mes || '').filter(text => text);
+            // 최신 메시지가 앞에 오는 문자열 배열 (ST 스캔 규약)
+            const chatText = globalContext.chat.slice(0, upToMessageId + 1).map(msg => msg?.mes || '').filter(text => text).reverse();
 
             // chatText가 비어있으면 건너뛰기
             if (chatText.length === 0) {
